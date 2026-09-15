@@ -226,16 +226,29 @@ export default function RequesterPage({ params }: PageProps) {
   async function togglePurchased(item: Item) {
     if (!supabase) return;
     const next = !item.purchased;
+    const prevSortOrder = item.sort_order;
+
+    // Al marcarlo comprado, lo mandamos al final de su categoría para
+    // que la lista de "pendientes" quede arriba y ordenada.
+    const siblings = items.filter((i) => i.category_id === item.category_id);
+    const nextSortOrder = next
+      ? Math.max(0, ...siblings.map((i) => i.sort_order)) + 1
+      : prevSortOrder;
+
     setItems((prev) =>
-      prev.map((i) => (i.id === item.id ? { ...i, purchased: next } : i))
+      prev.map((i) =>
+        i.id === item.id ? { ...i, purchased: next, sort_order: nextSortOrder } : i
+      )
     );
     const { error } = await supabase
       .from("items")
-      .update({ purchased: next })
+      .update({ purchased: next, sort_order: nextSortOrder })
       .eq("id", item.id);
     if (error) {
       setItems((prev) =>
-        prev.map((i) => (i.id === item.id ? { ...i, purchased: !next } : i))
+        prev.map((i) =>
+          i.id === item.id ? { ...i, purchased: !next, sort_order: prevSortOrder } : i
+        )
       );
       setError(error.message);
     }
@@ -453,7 +466,18 @@ function ItemRow({
   }
 
   function handleFrontClickCapture(e: React.MouseEvent<HTMLDivElement>) {
-    // Si estaba deslizada, el primer toque la cierra en vez de activar
+    // Después de un swipe, el navegador dispara igual un "click" al
+    // soltar el dedo. Si no lo ignorábamos acá, ese click fantasma
+    // volvía a cerrar la fila apenas se abría (no daba tiempo a tocar
+    // el tacho). Lo consumimos una vez y recién el próximo toque
+    // (sin arrastre) cuenta como "cerrar deslizando el dedo".
+    if (draggedRef.current) {
+      draggedRef.current = false;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    // Si estaba deslizada, un toque nuevo la cierra en vez de activar
     // lo que haya debajo (evita cerrar-y-tocar-otra-cosa sin querer).
     if (translate !== 0) {
       e.preventDefault();
@@ -472,18 +496,46 @@ function ItemRow({
   }
 
   return (
-    <div className="relative overflow-hidden rounded-xl">
+    <div className={`relative overflow-hidden rounded-xl border shadow-sm ${theme.softBorder}`}>
       <div className="absolute inset-y-0 right-0 flex items-stretch">
         <button
           onClick={handleTrashTap}
           aria-label={confirming ? "Confirmar borrado" : "Borrar (deslizado)"}
           style={{ width: SWIPE_REVEAL }}
-          className={`flex flex-col items-center justify-center gap-0.5 text-xs font-medium text-white transition-colors ${
-            confirming ? "bg-red-600" : "bg-red-500"
+          className={`flex flex-col items-center justify-center gap-1 text-white transition-colors ${
+            confirming ? "bg-[#c1443f]" : "bg-[#d3615c]"
           }`}
         >
-          <span className="text-lg leading-none">{confirming ? "✓" : "🗑"}</span>
-          <span>{confirming ? "¿Seguro?" : "Borrar"}</span>
+          {confirming ? (
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2.5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-7 w-7"
+            >
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+          ) : (
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-7 w-7"
+            >
+              <path d="M3 6h18" />
+              <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+              <path d="M10 11v6" />
+              <path d="M14 11v6" />
+            </svg>
+          )}
+          <span className="text-sm font-bold">{confirming ? "¿Seguro?" : "Borrar"}</span>
         </button>
       </div>
 
@@ -498,7 +550,7 @@ function ItemRow({
           transition: dragging ? "none" : "transform 200ms ease",
           touchAction: "pan-y",
         }}
-        className={`relative flex items-center gap-3 rounded-xl border bg-white p-3 shadow-sm ${theme.softBorder} ${
+        className={`relative flex items-center gap-3 bg-white p-3 ${
           item.purchased ? "opacity-60" : ""
         }`}
       >
