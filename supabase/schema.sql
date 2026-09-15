@@ -1,6 +1,11 @@
 -- Trip/Errand Catalog — initial schema
 -- Run this once in the Supabase project's SQL Editor
 -- (Dashboard → SQL Editor → New query → paste and run).
+--
+-- If you already ran an earlier version of this file against a live
+-- project, don't re-run the whole thing — use
+-- supabase/migrations/002_requester_color.sql instead, it only adds
+-- what's new (color column + policies) without touching existing data.
 
 create extension if not exists "pgcrypto";
 
@@ -11,6 +16,10 @@ create extension if not exists "pgcrypto";
 create table if not exists requesters (
     id uuid primary key default gen_random_uuid(),
     name text not null,
+    -- Tema de color elegido al crear el perfil (ver src/lib/theme.ts).
+    -- El check evita valores que el frontend no sepa pintar.
+    color text not null default 'green'
+      check (color in ('green', 'pink', 'blue', 'amber', 'violet')),
     created_at timestamptz not null default now()
     );
 
@@ -37,12 +46,12 @@ create index if not exists categories_requester_id_idx on categories(requester_i
 create index if not exists items_category_id_idx on items(category_id);
 
 -- ─────────────────────────────────────────────────────────
--- Seed data: the two requesters + starter categories
--- Edit the names and add/remove categories as needed.
--- (Kept in Spanish so whoever reads/maintains this data does so in Spanish.)
+-- Seed data: two starter requesters + categories.
+-- Cualquier persona nueva se crea desde la app (pantalla "Nueva
+-- persona"), no hace falta tocar este archivo para eso.
 -- ─────────────────────────────────────────────────────────
 
-insert into requesters (name) values ('Cami'), ('Meli')
+insert into requesters (name, color) values ('Cami', 'green'), ('Meli', 'pink')
     on conflict do nothing;
 
 insert into categories (requester_id, name, sort_order)
@@ -74,6 +83,8 @@ alter table items enable row level security;
 
 create policy "requesters: public read" on requesters
   for select using (true);
+create policy "requesters: public insert" on requesters
+  for insert with check (true);
 
 create policy "categories: public read" on categories
   for select using (true);
@@ -90,12 +101,13 @@ create policy "items: public delete" on items
   for delete using (true);
 
 -- ─────────────────────────────────────────────────────────
--- Realtime: so "purchased" syncs instantly between mom/dad's
--- phone and yours/your sister's.
+-- Realtime: so a new person, a new category, or "purchased"
+-- sync instantly across everyone's phone.
 -- ─────────────────────────────────────────────────────────
 
-alter publication supabase_realtime add table items;
+alter publication supabase_realtime add table requesters;
 alter publication supabase_realtime add table categories;
+alter publication supabase_realtime add table items;
 
 -- ─────────────────────────────────────────────────────────
 -- Storage: bucket for photos taken from the phone
