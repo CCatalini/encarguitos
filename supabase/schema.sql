@@ -86,11 +86,19 @@ create policy "requesters: public read" on requesters
   for select using (true);
 create policy "requesters: public insert" on requesters
   for insert with check (true);
+create policy "requesters: public update" on requesters
+  for update using (true) with check (true);
+create policy "requesters: public delete" on requesters
+  for delete using (true);
 
 create policy "categories: public read" on categories
   for select using (true);
 create policy "categories: public insert" on categories
   for insert with check (true);
+create policy "categories: public update" on categories
+  for update using (true) with check (true);
+create policy "categories: public delete" on categories
+  for delete using (true);
 
 create policy "items: public read" on items
   for select using (true);
