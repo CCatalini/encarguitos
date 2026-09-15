@@ -1,6 +1,4 @@
--- Migración incremental: corré esto en el SQL Editor de tu proyecto
--- Supabase existente (no hace falta correr supabase/schema.sql de nuevo,
--- este archivo solo agrega lo nuevo sin tocar tus datos actuales).
+-- Migración:
 
 -- 1. Columna de color por persona, con Cami/Meli ya asignadas.
 alter table requesters

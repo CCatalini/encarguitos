@@ -1,6 +1,4 @@
--- Migración incremental: corré esto en el SQL Editor de tu proyecto
--- Supabase existente. Suma orden manual a los ítems dentro de cada
--- categoría (antes se mostraban por fecha de creación nada más).
+-- Migración: Suma orden manual a los ítems dentro de cada
 
 alter table items
   add column if not exists sort_order integer not null default 0;
