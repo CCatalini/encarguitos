@@ -1,53 +1,56 @@
-## Encarguitos
+# Encarguitos
 
-Lo que le pedís a quien viaja, organizado por persona y por categoría. 
+Lo que le pedís a quien viaja, organizado por persona y por categoría.
 
-Encarguitos es una web app para coordinar encargos de viaje entre familia. Cada persona arma su propia lista dividida en categorías personalizables (perfume, zapatillas, ropa, maquillaje, lo que sea), y por cada cosa pedida puede sumar una imagen de referencia, la marca y un comentario opcional. Quien viaja abre una vista simple desde el celular y va tildando qué consiguió — con todo sincronizado al instante entre los dos lados, sin necesidad de crear cuenta ni instalar nada desde una store.
+Cada persona arma su propia lista dividida en categorías personalizables (perfume, zapatillas, ropa, maquillaje, lo que sea), con imagen de referencia, marca y un comentario opcional por cada cosa pedida. Quien viaja abre la lista desde el celular y va tildando qué consiguió, sincronizado al instante entre todos — sin cuentas ni instalación.
 
-### Stack
+Cada persona elige un color al crear su perfil (verde, rosa, celeste, ámbar o violeta) y su vista entera se pinta con esa paleta.
+
+## Stack
 
 - [Next.js](https://nextjs.org) (App Router) + TypeScript
 - [Tailwind CSS](https://tailwindcss.com)
 - [Supabase](https://supabase.com) — Postgres, Realtime y Storage
 - Deploy en [Vercel](https://vercel.com)
 
+## Modelo de datos
 
-### Poner esto a andar
+| Tabla        | Campos clave                                                             | Para qué                              |
+| ------------ | ------------------------------------------------------------------------- | -------------------------------------- |
+| `requesters` | `id`, `name`, `color`                                                     | Una fila por persona, con su tema      |
+| `categories` | `id`, `requester_id`, `name`, `sort_order`                                | Categorías por persona                 |
+| `items`      | `id`, `category_id`, `image_url`, `brand`, `comment`, `purchased`         | Cada cosa pedida y su estado de compra |
 
-#### 1. Instalar dependencias
+No hay login: el acceso es por link no listado. Las políticas de acceso (RLS) están en `supabase/schema.sql`.
 
-```bash
-npm install
-```
+## Correr el proyecto en local
 
-#### 2. Correrlo en local
+1. Instalar dependencias:
 
-```bash
-npm run dev
-```
+   ```bash
+   npm install
+   ```
 
-Abrí [http://localhost:3000](http://localhost:3000). Si ves "Conectado ✓" con
-los nombres, Supabase está bien configurado.
+2. Crear un proyecto en [supabase.com](https://supabase.com) y correr `supabase/schema.sql` en el SQL Editor (Dashboard → SQL Editor → New query). Esto crea las tablas, las políticas, activa Realtime y deja cargados los datos iniciales.
 
-### Modelo de datos
+3. Copiar `.env.example` a `.env.local` y completar con la Project URL y la clave `anon public` del proyecto (Project Settings → API):
 
-| Tabla         | Campos clave                                                                          | Para qué                                  |
-| ------------- | -------------------------------------------------------------------------------------- |-------------------------------------------|
-| `requesters`  | `id`, `name`                                                                            | Separa las listas                         |
-| `categories`  | `id`, `requester_id`, `name`, `sort_order`                                              | Categorías por persona, customizables     |
-| `items`       | `id`, `category_id`, `image_url`, `brand`, `comment`, `purchased`, `created_by`         | Cada cosa pedida, con su estado de compra |
+   ```bash
+   cp .env.example .env.local
+   ```
 
+4. Levantar el server de desarrollo:
 
-### Deploy en Vercel
+   ```bash
+   npm run dev
+   ```
 
-1. Subí este repo a GitHub.
-2. En [vercel.com](https://vercel.com), **Add New → Project**, importá el
-   repo.
-3. En **Environment Variables**, cargá `NEXT_PUBLIC_SUPABASE_URL` y
-   `NEXT_PUBLIC_SUPABASE_ANON_KEY` con los mismos valores de `.env.local`.
-4. Deploy. Con eso ya queda una URL pública para compartir con tus papás.
+   Abrir [http://localhost:3000](http://localhost:3000).
 
-Para que en Android quede como una app (y no como una pestaña de Chrome
-perdida), desde el celular: abrir la URL en Chrome → menú (⋮) → **Agregar a
-pantalla de inicio**. El manifest de PWA para que esto quede prolijo con
-ícono propio se agrega en la fase 3 del plan.
+## Deploy
+
+1. Importar el repo en [Vercel](https://vercel.com).
+2. Cargar `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_ANON_KEY` como variables de entorno.
+3. Deploy.
+
+Desde el celular, para que quede como una app (Android): abrir la URL en Chrome → menú (⋮) → **Agregar a pantalla de inicio**.

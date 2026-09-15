@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Encarguitos",
   description:
-    "Lo que Cami y Meli quieren que les traigan del viaje, y lo que ya se compró.",
+    "Lo que Cami y Meli quieren que les traigan del viaje.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
