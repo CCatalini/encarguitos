@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
 import type { Category, Item, Requester } from "@/lib/supabase/types";
@@ -426,6 +427,7 @@ function ItemRow({
   const [translate, setTranslate] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const dragStartX = useRef<number | null>(null);
   const dragStartTranslate = useRef(0);
   const draggedRef = useRef(false);
@@ -438,6 +440,22 @@ function ItemRow({
     }, 3500);
     return () => clearTimeout(timeout);
   }, [confirming]);
+
+  // Foto ampliada: fondo oscurecido, se cierra tocando afuera o con Escape,
+  // y bloquea el scroll de atrás mientras está abierta.
+  useEffect(() => {
+    if (!lightboxOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setLightboxOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [lightboxOpen]);
 
   function handlePointerDown(e: React.PointerEvent<HTMLDivElement>) {
     dragStartX.current = e.clientX;
@@ -573,7 +591,13 @@ function ItemRow({
           </button>
         </div>
 
-        <div
+        <button
+          type="button"
+          onClick={() => {
+            if (item.image_url && imgOk) setLightboxOpen(true);
+          }}
+          aria-label={item.image_url && imgOk ? "Ver imagen más grande" : undefined}
+          disabled={!item.image_url || !imgOk}
           className={`flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-stone-100 ${
             item.purchased ? "opacity-50" : ""
           }`}
@@ -589,7 +613,7 @@ function ItemRow({
           ) : (
             <span className="text-lg text-stone-300">···</span>
           )}
-        </div>
+        </button>
 
         <div className="min-w-0 flex-1">
           <p
@@ -622,6 +646,27 @@ function ItemRow({
           ✓
         </button>
       </div>
+
+      {lightboxOpen &&
+        item.image_url &&
+        createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={item.brand ?? "Imagen"}
+            onClick={() => setLightboxOpen(false)}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={item.image_url}
+              alt={item.brand ?? ""}
+              onClick={(e) => e.stopPropagation()}
+              className="max-h-[85vh] max-w-[92vw] rounded-xl object-contain shadow-2xl"
+            />
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
