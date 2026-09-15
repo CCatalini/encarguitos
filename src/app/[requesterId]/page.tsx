@@ -503,7 +503,7 @@ function ItemRow({
           aria-label={confirming ? "Confirmar borrado" : "Borrar (deslizado)"}
           style={{ width: SWIPE_REVEAL }}
           className={`flex flex-col items-center justify-center gap-1 text-white transition-colors ${
-            confirming ? "bg-[#c1443f]" : "bg-[#d3615c]"
+            confirming ? "bg-[#c53030]" : "bg-[#e5484d]"
           }`}
         >
           {confirming ? (
@@ -550,8 +550,8 @@ function ItemRow({
           transition: dragging ? "none" : "transform 200ms ease",
           touchAction: "pan-y",
         }}
-        className={`relative flex items-center gap-3 bg-white p-3 ${
-          item.purchased ? "opacity-60" : ""
+        className={`relative flex items-center gap-3 p-3 ${
+          item.purchased ? "bg-stone-50" : "bg-white"
         }`}
       >
         <div className="flex shrink-0 flex-col">
@@ -573,7 +573,11 @@ function ItemRow({
           </button>
         </div>
 
-        <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-stone-100">
+        <div
+          className={`flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-stone-100 ${
+            item.purchased ? "opacity-50" : ""
+          }`}
+        >
           {item.image_url && imgOk ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -589,8 +593,8 @@ function ItemRow({
 
         <div className="min-w-0 flex-1">
           <p
-            className={`truncate text-sm font-medium text-stone-800 ${
-              item.purchased ? "line-through" : ""
+            className={`truncate text-sm font-medium ${
+              item.purchased ? "text-stone-400 line-through" : "text-stone-800"
             }`}
           >
             {item.brand || "Sin producto"}
@@ -604,7 +608,12 @@ function ItemRow({
           onClick={onToggle}
           aria-label={item.purchased ? "Marcar pendiente" : "Marcar comprado"}
           aria-pressed={item.purchased}
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 text-base transition ${
+          disabled={translate !== 0}
+          style={{
+            opacity: translate === 0 ? 1 : 0,
+            transition: dragging ? "none" : "opacity 150ms ease",
+          }}
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 text-base ${
             item.purchased
               ? `${theme.accentBg} border-transparent text-white`
               : "border-stone-300 text-transparent hover:border-stone-400"
