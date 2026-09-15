@@ -160,6 +160,39 @@ export default function RequesterPage({ params }: PageProps) {
     setActiveCategoryId(data.id);
   }
 
+  async function renameCategory(id: string, name: string) {
+    if (!supabase) return;
+    const prevName = categories.find((c) => c.id === id)?.name;
+    setCategories((prev) => prev.map((c) => (c.id === id ? { ...c, name } : c)));
+    const { error } = await supabase.from("categories").update({ name }).eq("id", id);
+    if (error) {
+      setCategories((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, name: prevName ?? c.name } : c))
+      );
+      setError(error.message);
+    }
+  }
+
+  async function deleteCategory(id: string) {
+    if (!supabase) return;
+    const prevCategories = categories;
+    const prevItems = items;
+    const remaining = categories.filter((c) => c.id !== id);
+    setCategories(remaining);
+    setItems((prev) => prev.filter((i) => i.category_id !== id));
+    setActiveCategoryId((current) =>
+      current === id ? (remaining[0]?.id ?? null) : current
+    );
+    // Al borrar la categoría se borran en cascada sus ítems (ver
+    // supabase/schema.sql: "on delete cascade").
+    const { error } = await supabase.from("categories").delete().eq("id", id);
+    if (error) {
+      setCategories(prevCategories);
+      setItems(prevItems);
+      setError(error.message);
+    }
+  }
+
   async function addItem(input: {
     image_url: string;
     brand: string;
@@ -292,6 +325,8 @@ export default function RequesterPage({ params }: PageProps) {
         activeId={activeCategoryId}
         onSelect={setActiveCategoryId}
         onAdd={addCategory}
+        onRename={renameCategory}
+        onDelete={deleteCategory}
         theme={theme}
       />
 
@@ -333,21 +368,88 @@ export default function RequesterPage({ params }: PageProps) {
   );
 }
 
+function TrashIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M3 6h18" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+    </svg>
+  );
+}
+
+function CheckIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
+function PencilIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+      <path d="m15 5 4 4" />
+    </svg>
+  );
+}
+
 function CategoryTabs({
   categories,
   activeId,
   onSelect,
   onAdd,
+  onRename,
+  onDelete,
   theme,
 }: {
   categories: Category[];
   activeId: string | null;
   onSelect: (id: string) => void;
   onAdd: (name: string) => void;
+  onRename: (id: string, name: string) => void;
+  onDelete: (id: string) => void;
   theme: ReturnType<typeof themeOf>;
 }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const confirmingDelete = confirmDeleteId !== null && confirmDeleteId === activeId;
+
+  useEffect(() => {
+    if (!confirmingDelete) return;
+    const timeout = setTimeout(() => setConfirmDeleteId(null), 3000);
+    return () => clearTimeout(timeout);
+  }, [confirmingDelete]);
 
   function submit() {
     const trimmed = name.trim();
@@ -356,44 +458,117 @@ function CategoryTabs({
     setAdding(false);
   }
 
+  function startEditing(id: string, currentName: string) {
+    setEditingId(id);
+    setEditName(currentName);
+    setConfirmDeleteId(null);
+  }
+
+  function submitEdit() {
+    if (!editingId) return;
+    const trimmed = editName.trim();
+    if (trimmed) onRename(editingId, trimmed);
+    setEditingId(null);
+    setEditName("");
+  }
+
+  function handleTrashClick() {
+    if (!activeId) return;
+    if (!confirmingDelete) {
+      setConfirmDeleteId(activeId);
+      return;
+    }
+    setConfirmDeleteId(null);
+    onDelete(activeId);
+  }
+
+  const activeCategory = categories.find((c) => c.id === activeId) ?? null;
+
   return (
-    <div className="flex gap-2 overflow-x-auto border-b border-stone-200 bg-white px-4 py-3">
-      {categories.map((c) => (
+    <div className="flex items-center gap-2 border-b border-stone-200 bg-white px-4 py-3">
+      <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto">
+        {categories.map((c) =>
+          editingId === c.id ? (
+            <input
+              key={c.id}
+              autoFocus
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              onBlur={submitEdit}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitEdit();
+                if (e.key === "Escape") {
+                  setEditingId(null);
+                  setEditName("");
+                }
+              }}
+              className="w-40 shrink-0 rounded-full border border-stone-300 px-4 py-1.5 text-sm outline-none"
+            />
+          ) : (
+            <button
+              key={c.id}
+              onClick={() => onSelect(c.id)}
+              className={`shrink-0 rounded-full px-4 py-1.5 text-sm font-medium transition ${
+                c.id === activeId ? theme.tabActive : theme.tabInactive
+              }`}
+            >
+              {c.name}
+            </button>
+          )
+        )}
+      </div>
+
+      <div className="flex shrink-0 items-center gap-1">
+        {adding ? (
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={submit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submit();
+              if (e.key === "Escape") {
+                setName("");
+                setAdding(false);
+              }
+            }}
+            placeholder="Nombre de la categoría"
+            className="w-40 shrink-0 rounded-full border border-stone-300 px-4 py-1.5 text-sm outline-none"
+          />
+        ) : (
+          <button
+            onClick={() => setAdding(true)}
+            className="shrink-0 rounded-full border border-dashed border-stone-300 px-4 py-1.5 text-sm text-stone-400 hover:border-stone-400 hover:text-stone-600"
+          >
+            + Categoría
+          </button>
+        )}
+
         <button
-          key={c.id}
-          onClick={() => onSelect(c.id)}
-          className={`shrink-0 rounded-full px-4 py-1.5 text-sm font-medium transition ${
-            c.id === activeId ? theme.tabActive : theme.tabInactive
+          type="button"
+          onClick={() => activeCategory && startEditing(activeCategory.id, activeCategory.name)}
+          disabled={!activeCategory}
+          aria-label="Editar categoría"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-stone-400 transition hover:bg-stone-100 hover:text-stone-600 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+        >
+          <PencilIcon />
+        </button>
+
+        <button
+          type="button"
+          onClick={handleTrashClick}
+          disabled={!activeCategory}
+          aria-label={confirmingDelete ? "Confirmar borrado de categoría" : "Borrar categoría"}
+          className={`flex h-8 shrink-0 items-center justify-center gap-1 rounded-full px-2 transition disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent ${
+            confirmingDelete
+              ? "bg-[#c53030] text-white hover:bg-[#b32d2d]"
+              : "text-stone-400 hover:bg-stone-100 hover:text-stone-600"
           }`}
         >
-          {c.name}
+          {confirmingDelete ? <CheckIcon className="h-4 w-4" /> : <TrashIcon className="h-4 w-4" />}
+          {confirmingDelete && <span className="text-xs font-bold">¿Seguro?</span>}
         </button>
-      ))}
-
-      {adding ? (
-        <input
-          autoFocus
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onBlur={submit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") submit();
-            if (e.key === "Escape") {
-              setName("");
-              setAdding(false);
-            }
-          }}
-          placeholder="Nombre de la categoría"
-          className="w-40 shrink-0 rounded-full border border-stone-300 px-4 py-1.5 text-sm outline-none"
-        />
-      ) : (
-        <button
-          onClick={() => setAdding(true)}
-          className="shrink-0 rounded-full border border-dashed border-stone-300 px-4 py-1.5 text-sm text-stone-400 hover:border-stone-400 hover:text-stone-600"
-        >
-          + Categoría
-        </button>
-      )}
+      </div>
     </div>
   );
 }
@@ -524,35 +699,7 @@ function ItemRow({
             confirming ? "bg-[#c53030]" : "bg-[#e5484d]"
           }`}
         >
-          {confirming ? (
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2.5}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-7 w-7"
-            >
-              <path d="M20 6 9 17l-5-5" />
-            </svg>
-          ) : (
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-7 w-7"
-            >
-              <path d="M3 6h18" />
-              <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-              <path d="M10 11v6" />
-              <path d="M14 11v6" />
-            </svg>
-          )}
+          {confirming ? <CheckIcon className="h-7 w-7" /> : <TrashIcon className="h-7 w-7" />}
           <span className="text-sm font-bold">{confirming ? "¿Seguro?" : "Borrar"}</span>
         </button>
       </div>
