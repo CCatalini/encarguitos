@@ -1,15 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase/client";
 import type { Requester } from "@/lib/supabase/types";
-
-const AVATAR_COLORS = [
-  "bg-teal-100 text-teal-800",
-  "bg-amber-100 text-amber-800",
-  "bg-rose-100 text-rose-800",
-  "bg-sky-100 text-sky-800",
-];
+import { themeOf } from "@/lib/theme";
 
 export default function Home() {
   const [requesters, setRequesters] = useState<Requester[] | null>(null);
@@ -17,14 +12,33 @@ export default function Home() {
 
   useEffect(() => {
     if (!supabase) return;
-    supabase
-      .from("requesters")
-      .select("*")
-      .order("name")
-      .then(({ data, error }) => {
-        if (error) setError(error.message);
-        else setRequesters(data);
-      });
+
+    const load = () =>
+      supabase!
+        .from("requesters")
+        .select("*")
+        .order("name")
+        .then(({ data, error }) => {
+          if (error) setError(error.message);
+          else setRequesters(data);
+        });
+
+    load();
+
+    // Si alguien crea una persona nueva desde otro celular, aparece acá
+    // sin necesidad de recargar la página.
+    const channel = supabase
+      .channel("home-requesters")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "requesters" },
+        () => load()
+      )
+      .subscribe();
+
+    return () => {
+      supabase?.removeChannel(channel);
+    };
   }, []);
 
   if (!isSupabaseConfigured) {
@@ -52,34 +66,37 @@ export default function Home() {
         <p className="text-sm text-stone-400">Cargando…</p>
       )}
 
-      {requesters && requesters.length === 0 && (
-        <p className="max-w-sm text-center text-sm text-stone-600">
-          Conectado a Supabase, pero la tabla <Code>requesters</Code> está
-          vacía. Corré <Code>supabase/schema.sql</Code> en el SQL Editor para
-          cargar los datos iniciales.
-        </p>
-      )}
-
-      {requesters && requesters.length > 0 && (
+      {requesters && (
         <div className="flex flex-wrap items-stretch justify-center gap-4">
-          {requesters.map((r, i) => (
-            <button
-              key={r.id}
-              type="button"
-              className="group flex w-36 flex-col items-center gap-3 rounded-2xl border border-stone-200 bg-white px-5 py-6 shadow-sm transition hover:-translate-y-0.5 hover:border-teal-300 hover:shadow-md"
-            >
-              <span
-                className={`flex h-14 w-14 items-center justify-center rounded-full text-xl font-semibold ${
-                  AVATAR_COLORS[i % AVATAR_COLORS.length]
-                }`}
+          {requesters.map((r) => {
+            const theme = themeOf(r.color);
+            return (
+              <Link
+                key={r.id}
+                href={`/${r.id}`}
+                className="group flex w-36 flex-col items-center gap-3 rounded-2xl border border-stone-200 bg-white px-5 py-6 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
               >
-                {r.name.charAt(0).toUpperCase()}
-              </span>
-              <span className="text-sm font-medium text-stone-800">
-                {r.name}
-              </span>
-            </button>
-          ))}
+                <span
+                  className={`flex h-14 w-14 items-center justify-center rounded-full text-xl font-semibold ${theme.avatarBg} ${theme.avatarText}`}
+                >
+                  {r.name.charAt(0).toUpperCase()}
+                </span>
+                <span className="text-sm font-medium text-stone-800">
+                  {r.name}
+                </span>
+              </Link>
+            );
+          })}
+
+          <Link
+            href="/nuevo"
+            className="flex w-36 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-stone-300 px-5 py-6 text-stone-400 transition hover:-translate-y-0.5 hover:border-stone-400 hover:text-stone-600"
+          >
+            <span className="flex h-14 w-14 items-center justify-center rounded-full border border-dashed border-stone-300 text-2xl leading-none">
+              +
+            </span>
+            <span className="text-sm font-medium">Nueva persona</span>
+          </Link>
         </div>
       )}
     </Shell>
