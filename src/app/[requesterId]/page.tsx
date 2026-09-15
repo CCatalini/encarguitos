@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
 import type { Category, Item, Requester } from "@/lib/supabase/types";
@@ -293,7 +293,7 @@ export default function RequesterPage({ params }: PageProps) {
           <div className="mx-auto flex max-w-md flex-col gap-3">
             {activeItems.length === 0 && (
               <p className="py-8 text-center text-sm text-stone-400">
-                Nada cargado todavía en {activeCategory.name}.
+                Nada cargado en {activeCategory.name}.
               </p>
             )}
 
@@ -384,6 +384,11 @@ function CategoryTabs({
   );
 }
 
+// Cuánto se desliza la fila para revelar el tacho (px).
+const SWIPE_REVEAL = 88;
+// Distancia mínima de arrastre horizontal para no confundir un tap con un swipe.
+const SWIPE_DRAG_THRESHOLD = 6;
+
 function ItemRow({
   item,
   theme,
@@ -404,97 +409,158 @@ function ItemRow({
   onMoveDown: () => void;
 }) {
   const [imgOk, setImgOk] = useState(true);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // 0 = cerrado, -SWIPE_REVEAL = deslizado (muestra el tacho).
+  const [translate, setTranslate] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const dragStartX = useRef<number | null>(null);
+  const dragStartTranslate = useRef(0);
+  const draggedRef = useRef(false);
 
   useEffect(() => {
-    if (!confirmingDelete) return;
-    const timeout = setTimeout(() => setConfirmingDelete(false), 4000);
+    if (!confirming) return;
+    const timeout = setTimeout(() => {
+      setConfirming(false);
+      setTranslate(0);
+    }, 3500);
     return () => clearTimeout(timeout);
-  }, [confirmingDelete]);
+  }, [confirming]);
+
+  function handlePointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    dragStartX.current = e.clientX;
+    dragStartTranslate.current = translate;
+    draggedRef.current = false;
+    (e.target as Element).setPointerCapture(e.pointerId);
+  }
+
+  function handlePointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (dragStartX.current === null) return;
+    const dx = e.clientX - dragStartX.current;
+    if (Math.abs(dx) > SWIPE_DRAG_THRESHOLD) draggedRef.current = true;
+    if (!draggedRef.current) return;
+    setDragging(true);
+    const next = Math.min(0, Math.max(-SWIPE_REVEAL, dragStartTranslate.current + dx));
+    setTranslate(next);
+  }
+
+  function endDrag() {
+    if (dragStartX.current === null) return;
+    dragStartX.current = null;
+    setDragging(false);
+    if (draggedRef.current) {
+      setTranslate((t) => (t < -SWIPE_REVEAL / 2 ? -SWIPE_REVEAL : 0));
+    }
+  }
+
+  function handleFrontClickCapture(e: React.MouseEvent<HTMLDivElement>) {
+    // Si estaba deslizada, el primer toque la cierra en vez de activar
+    // lo que haya debajo (evita cerrar-y-tocar-otra-cosa sin querer).
+    if (translate !== 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      setTranslate(0);
+      setConfirming(false);
+    }
+  }
+
+  function handleTrashTap() {
+    if (confirming) {
+      onDelete();
+    } else {
+      setConfirming(true);
+    }
+  }
 
   return (
-    <div
-      className={`flex items-center gap-3 rounded-xl border bg-white p-3 shadow-sm ${theme.softBorder} ${
-        item.purchased ? "opacity-60" : ""
-      }`}
-    >
-      <div className="flex shrink-0 flex-col">
+    <div className="relative overflow-hidden rounded-xl">
+      <div className="absolute inset-y-0 right-0 flex items-stretch">
         <button
-          onClick={onMoveUp}
-          disabled={isFirst}
-          aria-label="Subir"
-          className="flex h-5 w-5 items-center justify-center text-stone-300 hover:text-stone-600 disabled:opacity-0"
-        >
-          ▲
-        </button>
-        <button
-          onClick={onMoveDown}
-          disabled={isLast}
-          aria-label="Bajar"
-          className="flex h-5 w-5 items-center justify-center text-stone-300 hover:text-stone-600 disabled:opacity-0"
-        >
-          ▼
-        </button>
-      </div>
-
-      <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-stone-100">
-        {item.image_url && imgOk ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={item.image_url}
-            alt={item.brand ?? ""}
-            className="h-full w-full object-cover"
-            onError={() => setImgOk(false)}
-          />
-        ) : (
-          <span className="text-lg text-stone-300">···</span>
-        )}
-      </div>
-
-      <div className="min-w-0 flex-1">
-        <p
-          className={`truncate text-sm font-medium text-stone-800 ${
-            item.purchased ? "line-through" : ""
+          onClick={handleTrashTap}
+          aria-label={confirming ? "Confirmar borrado" : "Borrar (deslizado)"}
+          style={{ width: SWIPE_REVEAL }}
+          className={`flex flex-col items-center justify-center gap-0.5 text-xs font-medium text-white transition-colors ${
+            confirming ? "bg-red-600" : "bg-red-500"
           }`}
         >
-          {item.brand || "Sin producto"}
-        </p>
-        {item.comment && (
-          <p className="truncate text-xs text-stone-500">{item.comment}</p>
-        )}
+          <span className="text-lg leading-none">{confirming ? "✓" : "🗑"}</span>
+          <span>{confirming ? "¿Seguro?" : "Borrar"}</span>
+        </button>
       </div>
 
-      <button
-        onClick={() => {
-          if (confirmingDelete) {
-            setConfirmingDelete(false);
-            onDelete();
-          } else {
-            setConfirmingDelete(true);
-          }
+      <div
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onClickCapture={handleFrontClickCapture}
+        style={{
+          transform: `translateX(${translate}px)`,
+          transition: dragging ? "none" : "transform 200ms ease",
+          touchAction: "pan-y",
         }}
-        aria-label={confirmingDelete ? "Confirmar borrado" : "Borrar"}
-        className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium leading-none transition ${
-          confirmingDelete
-            ? "bg-red-500 text-white"
-            : "text-stone-300 hover:text-red-500"
+        className={`relative flex items-center gap-3 rounded-xl border bg-white p-3 shadow-sm ${theme.softBorder} ${
+          item.purchased ? "opacity-60" : ""
         }`}
       >
-        {confirmingDelete ? "¿Borrar?" : "×"}
-      </button>
+        <div className="flex shrink-0 flex-col">
+          <button
+            onClick={onMoveUp}
+            disabled={isFirst}
+            aria-label="Subir"
+            className="flex h-5 w-5 items-center justify-center text-stone-300 hover:text-stone-600 disabled:opacity-0"
+          >
+            ▲
+          </button>
+          <button
+            onClick={onMoveDown}
+            disabled={isLast}
+            aria-label="Bajar"
+            className="flex h-5 w-5 items-center justify-center text-stone-300 hover:text-stone-600 disabled:opacity-0"
+          >
+            ▼
+          </button>
+        </div>
 
-      <button
-        onClick={onToggle}
-        aria-label={item.purchased ? "Marcar pendiente" : "Marcar comprado"}
-        aria-pressed={item.purchased}
-        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 text-base transition ${
-          item.purchased
-            ? `${theme.accentBg} border-transparent text-white`
-            : "border-stone-300 text-transparent hover:border-stone-400"
-        }`}
-      >
-        ✓
-      </button>
+        <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-stone-100">
+          {item.image_url && imgOk ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={item.image_url}
+              alt={item.brand ?? ""}
+              className="h-full w-full object-cover"
+              onError={() => setImgOk(false)}
+            />
+          ) : (
+            <span className="text-lg text-stone-300">···</span>
+          )}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <p
+            className={`truncate text-sm font-medium text-stone-800 ${
+              item.purchased ? "line-through" : ""
+            }`}
+          >
+            {item.brand || "Sin producto"}
+          </p>
+          {item.comment && (
+            <p className="truncate text-xs text-stone-500">{item.comment}</p>
+          )}
+        </div>
+
+        <button
+          onClick={onToggle}
+          aria-label={item.purchased ? "Marcar pendiente" : "Marcar comprado"}
+          aria-pressed={item.purchased}
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 text-base transition ${
+            item.purchased
+              ? `${theme.accentBg} border-transparent text-white`
+              : "border-stone-300 text-transparent hover:border-stone-400"
+          }`}
+        >
+          ✓
+        </button>
+      </div>
     </div>
   );
 }
