@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Catálogo de Viaje",
+  title: "Encarguitos",
   description:
     "Lo que Cami y Meli quieren que les traigan del viaje, y lo que ya se compró.",
 };
@@ -24,7 +24,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="es"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-zinc-50">{children}</body>
+      <body className="min-h-full flex flex-col bg-stone-50">{children}</body>
     </html>
   );
 }

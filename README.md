@@ -11,16 +11,6 @@ Encarguitos es una web app para coordinar encargos de viaje entre familia. Cada 
 - [Supabase](https://supabase.com) — Postgres, Realtime y Storage
 - Deploy en [Vercel](https://vercel.com)
 
-## Estado actual — Base técnica (días 1–5)
-
-- [x] Proyecto Next.js con TypeScript y Tailwind
-- [x] Cliente de Supabase tipado (`src/lib/supabase`)
-- [x] Schema de base de datos con RLS y Realtime (`supabase/schema.sql`)
-- [x] Página de inicio que confirma la conexión a Supabase
-- [ ] Proyecto Supabase real creado (lo hacés vos, ver abajo)
-- [ ] Deploy en Vercel
-
-Lo que sigue (vistas para cargar y para comprar) es la fase 2 y 3 del plan.
 
 ### Poner esto a andar
 
@@ -30,7 +20,7 @@ Lo que sigue (vistas para cargar y para comprar) es la fase 2 y 3 del plan.
 npm install
 ```
 
-### 4. Correrlo en local
+#### 2. Correrlo en local
 
 ```bash
 npm run dev
@@ -39,7 +29,7 @@ npm run dev
 Abrí [http://localhost:3000](http://localhost:3000). Si ves "Conectado ✓" con
 los nombres, Supabase está bien configurado.
 
-## Modelo de datos
+### Modelo de datos
 
 | Tabla         | Campos clave                                                                          | Para qué                                  |
 | ------------- | -------------------------------------------------------------------------------------- |-------------------------------------------|
@@ -48,7 +38,7 @@ los nombres, Supabase está bien configurado.
 | `items`       | `id`, `category_id`, `image_url`, `brand`, `comment`, `purchased`, `created_by`         | Cada cosa pedida, con su estado de compra |
 
 
-## Deploy en Vercel
+### Deploy en Vercel
 
 1. Subí este repo a GitHub.
 2. En [vercel.com](https://vercel.com), **Add New → Project**, importá el
