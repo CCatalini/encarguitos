@@ -382,7 +382,7 @@ function ItemRow({
             item.purchased ? "line-through" : ""
           }`}
         >
-          {item.brand || "Sin marca"}
+          {item.brand || "Sin producto"}
         </p>
         {item.comment && (
           <p className="truncate text-xs text-stone-500">{item.comment}</p>
@@ -462,6 +462,13 @@ function AddItemForm({
       onSubmit={submit}
       className={`mt-2 flex flex-col gap-3 rounded-xl border p-4 ${theme.soft} ${theme.softBorder}`}
     >
+      <input
+        value={brand}
+        onChange={(e) => setBrand(e.target.value)}
+        placeholder="Producto"
+        autoFocus
+        className={`rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:ring-2 ${theme.ring}`}
+      />
       {imageUrl && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -477,13 +484,6 @@ function AddItemForm({
         value={imageUrl}
         onChange={(e) => setImageUrl(e.target.value)}
         placeholder="Link de una imagen (opcional)"
-        className={`rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:ring-2 ${theme.ring}`}
-      />
-      <input
-        value={brand}
-        onChange={(e) => setBrand(e.target.value)}
-        placeholder="Marca"
-        autoFocus
         className={`rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:ring-2 ${theme.ring}`}
       />
       <textarea
