@@ -1,0 +1,513 @@
+"use client";
+
+import { use, useEffect, useState } from "react";
+import Link from "next/link";
+import { supabase } from "@/lib/supabase/client";
+import type { Category, Item, Requester } from "@/lib/supabase/types";
+import { themeOf } from "@/lib/theme";
+
+type PageProps = {
+  params: Promise<{ requesterId: string }>;
+};
+
+export default function RequesterPage({ params }: PageProps) {
+  const { requesterId } = use(params);
+
+  const [requester, setRequester] = useState<Requester | null | "not-found">(
+    null
+  );
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [items, setItems] = useState<Item[]>([]);
+  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(
+    null
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!supabase) return;
+    let cancelled = false;
+
+    async function load() {
+      const { data: req, error: reqError } = await supabase!
+        .from("requesters")
+        .select("*")
+        .eq("id", requesterId)
+        .maybeSingle();
+
+      if (cancelled) return;
+      if (reqError) {
+        setError(reqError.message);
+        return;
+      }
+      if (!req) {
+        setRequester("not-found");
+        return;
+      }
+      setRequester(req);
+
+      const { data: cats, error: catsError } = await supabase!
+        .from("categories")
+        .select("*")
+        .eq("requester_id", requesterId)
+        .order("sort_order");
+
+      if (cancelled) return;
+      if (catsError) {
+        setError(catsError.message);
+        return;
+      }
+      setCategories(cats ?? []);
+      setActiveCategoryId((current) => current ?? cats?.[0]?.id ?? null);
+
+      const categoryIds = (cats ?? []).map((c) => c.id);
+      if (categoryIds.length === 0) {
+        setItems([]);
+        return;
+      }
+
+      const { data: its, error: itsError } = await supabase!
+        .from("items")
+        .select("*")
+        .in("category_id", categoryIds)
+        .order("created_at");
+
+      if (cancelled) return;
+      if (itsError) {
+        setError(itsError.message);
+        return;
+      }
+      setItems(its ?? []);
+    }
+
+    load();
+
+    // Realtime: si vos y la otra persona (o tus papás) tienen esto
+    // abierto a la vez, los cambios de una aparecen en la otra.
+    const channel = supabase
+      .channel(`requester-${requesterId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "categories" },
+        () => load()
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "items" },
+        () => load()
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase?.removeChannel(channel);
+    };
+  }, [requesterId]);
+
+  if (requester === "not-found") {
+    return (
+      <main className="flex flex-1 flex-col items-center justify-center gap-4 bg-stone-50 px-8 py-16 text-center">
+        <p className="text-stone-600">No encontramos a esa persona.</p>
+        <Link href="/" className="text-sm text-stone-500 underline">
+          Volver al inicio
+        </Link>
+      </main>
+    );
+  }
+
+  if (error) {
+    return (
+      <main className="flex flex-1 items-center justify-center bg-stone-50 px-8 py-16">
+        <p className="max-w-sm text-center text-sm text-red-600">{error}</p>
+      </main>
+    );
+  }
+
+  if (!requester) {
+    return (
+      <main className="flex flex-1 items-center justify-center bg-stone-50 px-8 py-16">
+        <p className="text-sm text-stone-400">Cargando…</p>
+      </main>
+    );
+  }
+
+  const theme = themeOf(requester.color);
+  const activeCategory =
+    categories.find((c) => c.id === activeCategoryId) ?? null;
+  const activeItems = activeCategory
+    ? items.filter((i) => i.category_id === activeCategory.id)
+    : [];
+
+  async function addCategory(name: string) {
+    if (!supabase || !requester || requester === "not-found") return;
+    const nextOrder =
+      categories.length > 0
+        ? Math.max(...categories.map((c) => c.sort_order)) + 1
+        : 0;
+    const { data, error } = await supabase
+      .from("categories")
+      .insert({ requester_id: requester.id, name, sort_order: nextOrder })
+      .select()
+      .single();
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    setCategories((prev) => [...prev, data]);
+    setActiveCategoryId(data.id);
+  }
+
+  async function addItem(input: {
+    image_url: string;
+    brand: string;
+    comment: string;
+  }) {
+    if (!supabase || !activeCategory) return;
+    const { data, error } = await supabase
+      .from("items")
+      .insert({
+        category_id: activeCategory.id,
+        image_url: input.image_url || null,
+        brand: input.brand || null,
+        comment: input.comment || null,
+      })
+      .select()
+      .single();
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    setItems((prev) => [...prev, data]);
+  }
+
+  async function togglePurchased(item: Item) {
+    if (!supabase) return;
+    const next = !item.purchased;
+    setItems((prev) =>
+      prev.map((i) => (i.id === item.id ? { ...i, purchased: next } : i))
+    );
+    const { error } = await supabase
+      .from("items")
+      .update({ purchased: next })
+      .eq("id", item.id);
+    if (error) {
+      setItems((prev) =>
+        prev.map((i) => (i.id === item.id ? { ...i, purchased: !next } : i))
+      );
+      setError(error.message);
+    }
+  }
+
+  async function deleteItem(item: Item) {
+    if (!supabase) return;
+    setItems((prev) => prev.filter((i) => i.id !== item.id));
+    const { error } = await supabase.from("items").delete().eq("id", item.id);
+    if (error) setError(error.message);
+  }
+
+  return (
+    <main className="flex flex-1 flex-col bg-stone-50">
+      <header
+        className={`flex flex-col gap-4 rounded-b-3xl bg-gradient-to-br ${theme.headerFrom} ${theme.headerTo} px-6 pb-6 pt-5 text-white`}
+      >
+        <Link
+          href="/"
+          className="flex w-fit items-center gap-1 text-sm text-white/80 hover:text-white"
+        >
+          ← Encarguitos
+        </Link>
+        <div className="flex items-center gap-3">
+          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-lg font-semibold">
+            {requester.name.charAt(0).toUpperCase()}
+          </span>
+          <div>
+            <h1 className="text-xl font-semibold">{requester.name}</h1>
+            <p className="text-sm text-white/75">
+              {items.filter((i) => i.purchased).length} de {items.length}{" "}
+              conseguido{items.length === 1 ? "" : "s"}
+            </p>
+          </div>
+        </div>
+      </header>
+
+      <CategoryTabs
+        categories={categories}
+        activeId={activeCategoryId}
+        onSelect={setActiveCategoryId}
+        onAdd={addCategory}
+        theme={theme}
+      />
+
+      <div className="flex-1 px-4 pb-16 pt-4">
+        {categories.length === 0 && (
+          <p className="mt-10 text-center text-sm text-stone-400">
+            Todavía no hay categorías. Creá la primera arriba (Perfume,
+            Zapatillas, lo que sea).
+          </p>
+        )}
+
+        {activeCategory && (
+          <div className="mx-auto flex max-w-md flex-col gap-3">
+            {activeItems.length === 0 && (
+              <p className="py-8 text-center text-sm text-stone-400">
+                Nada cargado todavía en {activeCategory.name}.
+              </p>
+            )}
+
+            {activeItems.map((item) => (
+              <ItemRow
+                key={item.id}
+                item={item}
+                theme={theme}
+                onToggle={() => togglePurchased(item)}
+                onDelete={() => deleteItem(item)}
+              />
+            ))}
+
+            <AddItemForm theme={theme} onAdd={addItem} />
+          </div>
+        )}
+      </div>
+    </main>
+  );
+}
+
+function CategoryTabs({
+  categories,
+  activeId,
+  onSelect,
+  onAdd,
+  theme,
+}: {
+  categories: Category[];
+  activeId: string | null;
+  onSelect: (id: string) => void;
+  onAdd: (name: string) => void;
+  theme: ReturnType<typeof themeOf>;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+
+  function submit() {
+    const trimmed = name.trim();
+    if (trimmed) onAdd(trimmed);
+    setName("");
+    setAdding(false);
+  }
+
+  return (
+    <div className="flex gap-2 overflow-x-auto border-b border-stone-200 bg-white px-4 py-3">
+      {categories.map((c) => (
+        <button
+          key={c.id}
+          onClick={() => onSelect(c.id)}
+          className={`shrink-0 rounded-full px-4 py-1.5 text-sm font-medium transition ${
+            c.id === activeId ? theme.tabActive : theme.tabInactive
+          }`}
+        >
+          {c.name}
+        </button>
+      ))}
+
+      {adding ? (
+        <input
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={submit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submit();
+            if (e.key === "Escape") {
+              setName("");
+              setAdding(false);
+            }
+          }}
+          placeholder="Nombre de la categoría"
+          className="w-40 shrink-0 rounded-full border border-stone-300 px-4 py-1.5 text-sm outline-none"
+        />
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          className="shrink-0 rounded-full border border-dashed border-stone-300 px-4 py-1.5 text-sm text-stone-400 hover:border-stone-400 hover:text-stone-600"
+        >
+          + Categoría
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ItemRow({
+  item,
+  theme,
+  onToggle,
+  onDelete,
+}: {
+  item: Item;
+  theme: ReturnType<typeof themeOf>;
+  onToggle: () => void;
+  onDelete: () => void;
+}) {
+  const [imgOk, setImgOk] = useState(true);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  useEffect(() => {
+    if (!confirmingDelete) return;
+    const timeout = setTimeout(() => setConfirmingDelete(false), 4000);
+    return () => clearTimeout(timeout);
+  }, [confirmingDelete]);
+
+  return (
+    <div
+      className={`flex items-center gap-3 rounded-xl border bg-white p-3 shadow-sm ${theme.softBorder} ${
+        item.purchased ? "opacity-60" : ""
+      }`}
+    >
+      <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-stone-100">
+        {item.image_url && imgOk ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={item.image_url}
+            alt={item.brand ?? ""}
+            className="h-full w-full object-cover"
+            onError={() => setImgOk(false)}
+          />
+        ) : (
+          <span className="text-lg text-stone-300">···</span>
+        )}
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <p
+          className={`truncate text-sm font-medium text-stone-800 ${
+            item.purchased ? "line-through" : ""
+          }`}
+        >
+          {item.brand || "Sin marca"}
+        </p>
+        {item.comment && (
+          <p className="truncate text-xs text-stone-500">{item.comment}</p>
+        )}
+      </div>
+
+      <button
+        onClick={() => {
+          if (confirmingDelete) {
+            setConfirmingDelete(false);
+            onDelete();
+          } else {
+            setConfirmingDelete(true);
+          }
+        }}
+        aria-label={confirmingDelete ? "Confirmar borrado" : "Borrar"}
+        className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium leading-none transition ${
+          confirmingDelete
+            ? "bg-red-500 text-white"
+            : "text-stone-300 hover:text-red-500"
+        }`}
+      >
+        {confirmingDelete ? "¿Borrar?" : "×"}
+      </button>
+
+      <button
+        onClick={onToggle}
+        aria-label={item.purchased ? "Marcar pendiente" : "Marcar comprado"}
+        aria-pressed={item.purchased}
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 text-base transition ${
+          item.purchased
+            ? `${theme.accentBg} border-transparent text-white`
+            : "border-stone-300 text-transparent hover:border-stone-400"
+        }`}
+      >
+        ✓
+      </button>
+    </div>
+  );
+}
+
+function AddItemForm({
+  theme,
+  onAdd,
+}: {
+  theme: ReturnType<typeof themeOf>;
+  onAdd: (input: { image_url: string; brand: string; comment: string }) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [imageUrl, setImageUrl] = useState("");
+  const [brand, setBrand] = useState("");
+  const [comment, setComment] = useState("");
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!brand.trim() && !imageUrl.trim()) return;
+    onAdd({ image_url: imageUrl.trim(), brand: brand.trim(), comment: comment.trim() });
+    setImageUrl("");
+    setBrand("");
+    setComment("");
+    setOpen(false);
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className={`mt-2 rounded-xl border border-dashed px-4 py-3 text-sm font-medium ${theme.softBorder} ${theme.accentText} hover:${theme.soft}`}
+      >
+        + Agregar algo
+      </button>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={submit}
+      className={`mt-2 flex flex-col gap-3 rounded-xl border p-4 ${theme.soft} ${theme.softBorder}`}
+    >
+      {imageUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={imageUrl}
+          alt=""
+          className="h-24 w-24 self-center rounded-lg object-cover"
+          onError={(e) => {
+            (e.target as HTMLImageElement).style.display = "none";
+          }}
+        />
+      )}
+      <input
+        value={imageUrl}
+        onChange={(e) => setImageUrl(e.target.value)}
+        placeholder="Link de una imagen (opcional)"
+        className={`rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:ring-2 ${theme.ring}`}
+      />
+      <input
+        value={brand}
+        onChange={(e) => setBrand(e.target.value)}
+        placeholder="Marca"
+        autoFocus
+        className={`rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:ring-2 ${theme.ring}`}
+      />
+      <textarea
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        placeholder="Comentario (opcional) — talle, color, alguna aclaración"
+        rows={2}
+        className={`resize-none rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:ring-2 ${theme.ring}`}
+      />
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium text-white ${theme.accentBg} ${theme.accentBgHover}`}
+        >
+          Guardar
+        </button>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="rounded-lg border border-stone-300 px-4 py-2 text-sm text-stone-500"
+        >
+          Cancelar
+        </button>
+      </div>
+    </form>
+  );
+}
