@@ -2,29 +2,29 @@
 // Cuando el schema cambie, actualizar acá (más adelante se puede generar
 // automáticamente con `supabase gen types typescript`).
 
-export type Hija = {
+export type Requester = {
   id: string;
-  nombre: string;
-  creado_en: string;
+  name: string;
+  created_at: string;
 };
 
-export type Categoria = {
+export type Category = {
   id: string;
-  hija_id: string;
-  nombre: string;
-  orden: number;
-  creado_en: string;
+  requester_id: string;
+  name: string;
+  sort_order: number;
+  created_at: string;
 };
 
 export type Item = {
   id: string;
-  categoria_id: string;
-  imagen_url: string | null;
-  marca: string | null;
-  comentario: string | null;
-  comprado: boolean;
-  creado_por: string | null;
-  creado_en: string;
+  category_id: string;
+  image_url: string | null;
+  brand: string | null;
+  comment: string | null;
+  purchased: boolean;
+  created_by: string | null;
+  created_at: string;
 };
 
 // Shape mínimo que necesita el cliente de Supabase tipado (createClient<Database>).
@@ -33,19 +33,19 @@ export type Item = {
 export type Database = {
   public: {
     Tables: {
-      hijas: {
-        Row: Hija;
-        Insert: Partial<Hija> & { nombre: string };
-        Update: Partial<Hija>;
+      requesters: {
+        Row: Requester;
+        Insert: Partial<Requester> & { name: string };
+        Update: Partial<Requester>;
       };
-      categorias: {
-        Row: Categoria;
-        Insert: Partial<Categoria> & { hija_id: string; nombre: string };
-        Update: Partial<Categoria>;
+      categories: {
+        Row: Category;
+        Insert: Partial<Category> & { requester_id: string; name: string };
+        Update: Partial<Category>;
       };
       items: {
         Row: Item;
-        Insert: Partial<Item> & { categoria_id: string };
+        Insert: Partial<Item> & { category_id: string };
         Update: Partial<Item>;
       };
     };

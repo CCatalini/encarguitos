@@ -2,21 +2,21 @@
 
 import { useEffect, useState } from "react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase/client";
-import type { Hija } from "@/lib/supabase/types";
+import type { Requester } from "@/lib/supabase/types";
 
 export default function Home() {
-  const [hijas, setHijas] = useState<Hija[] | null>(null);
+  const [requesters, setRequesters] = useState<Requester[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabase) return;
     supabase
-      .from("hijas")
+      .from("requesters")
       .select("*")
-      .order("nombre")
+      .order("name")
       .then(({ data, error }) => {
         if (error) setError(error.message);
-        else setHijas(data);
+        else setRequesters(data);
       });
   }, []);
 
@@ -58,14 +58,14 @@ export default function Home() {
         </p>
       )}
 
-      {!error && hijas === null && (
+      {!error && requesters === null && (
         <p className="text-sm text-zinc-500">Cargando…</p>
       )}
 
-      {hijas && hijas.length === 0 && (
+      {requesters && requesters.length === 0 && (
         <p className="max-w-md text-center text-sm text-zinc-600">
           Conectado a Supabase, pero la tabla{" "}
-          <code className="rounded bg-zinc-100 px-1.5 py-0.5">hijas</code> está
+          <code className="rounded bg-zinc-100 px-1.5 py-0.5">requesters</code> está
           vacía. Corré <code className="rounded bg-zinc-100 px-1.5 py-0.5">
             supabase/schema.sql
           </code>{" "}
@@ -73,18 +73,18 @@ export default function Home() {
         </p>
       )}
 
-      {hijas && hijas.length > 0 && (
+      {requesters && requesters.length > 0 && (
         <div className="flex flex-col items-center gap-2">
           <p className="text-sm text-zinc-600">
             Conectado ✓ — hijas en la base:
           </p>
           <div className="flex gap-3">
-            {hijas.map((h) => (
+            {requesters.map((r) => (
               <span
-                key={h.id}
+                key={r.id}
                 className="rounded-full border border-zinc-200 bg-white px-4 py-1.5 text-sm font-medium text-zinc-800"
               >
-                {h.nombre}
+                {r.name}
               </span>
             ))}
           </div>
