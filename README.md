@@ -1,14 +1,10 @@
-# Catálogo de Viaje
+## Encarguitos
 
-App para que Cami y Meli carguen, por categoría, lo que quieren que sus papás
-les traigan de viaje — con imagen, marca y un comentario opcional — y para
-que sus papás vayan marcando qué compraron desde el celular, sincronizado en
-el momento.
+Lo que le pedís a quien viaja, organizado por persona y por categoría. 
 
-Plan completo del proyecto (20 días, por fases): ver el documento de
-planificación compartido en la conversación.
+Encarguitos es una web app para coordinar encargos de viaje entre familia. Cada persona arma su propia lista dividida en categorías personalizables (perfume, zapatillas, ropa, maquillaje, lo que sea), y por cada cosa pedida puede sumar una imagen de referencia, la marca y un comentario opcional. Quien viaja abre una vista simple desde el celular y va tildando qué consiguió — con todo sincronizado al instante entre los dos lados, sin necesidad de crear cuenta ni instalar nada desde una store.
 
-## Stack
+### Stack
 
 - [Next.js](https://nextjs.org) (App Router) + TypeScript
 - [Tailwind CSS](https://tailwindcss.com)
@@ -26,34 +22,13 @@ planificación compartido en la conversación.
 
 Lo que sigue (vistas para cargar y para comprar) es la fase 2 y 3 del plan.
 
-## Poner esto a andar
+### Poner esto a andar
 
-### 1. Instalar dependencias
+#### 1. Instalar dependencias
 
 ```bash
 npm install
 ```
-
-### 2. Crear el proyecto en Supabase
-
-1. Entrá a [supabase.com](https://supabase.com), creá una cuenta gratis y un
-   proyecto nuevo (elegí una región cercana, por ejemplo São Paulo).
-2. Andá a **SQL Editor → New query**, pegá el contenido de
-   [`supabase/schema.sql`](./supabase/schema.sql) y ejecutalo. Esto crea las
-   tablas, las políticas de acceso, activa Realtime y deja cargadas las dos
-   hijas más las categorías iniciales (Perfume, Zapatillas, Ropa deportiva,
-   Ropa común, Maquillaje — se editan o agregan más después, desde la app o
-   desde el SQL Editor).
-3. Andá a **Project Settings → API** y copiá la **Project URL** y la clave
-   **anon public**.
-
-### 3. Configurar las variables de entorno
-
-```bash
-cp .env.example .env.local
-```
-
-Completá `.env.local` con la URL y la clave que copiaste en el paso anterior.
 
 ### 4. Correrlo en local
 
@@ -62,19 +37,16 @@ npm run dev
 ```
 
 Abrí [http://localhost:3000](http://localhost:3000). Si ves "Conectado ✓" con
-los nombres de las hijas, Supabase está bien configurado.
+los nombres, Supabase está bien configurado.
 
 ## Modelo de datos
 
-| Tabla        | Campos clave                                                                    | Para qué                                  |
-| ------------ | -------------------------------------------------------------------------------- | ------------------------------------------ |
-| `hijas`      | `id`, `nombre`                                                                    | Separa las dos listas                      |
-| `categorias` | `id`, `hija_id`, `nombre`, `orden`                                                | Categorías por hija, customizables         |
-| `items`      | `id`, `categoria_id`, `imagen_url`, `marca`, `comentario`, `comprado`, `creado_por` | Cada cosa pedida, con su estado de compra |
+| Tabla         | Campos clave                                                                          | Para qué                                  |
+| ------------- | -------------------------------------------------------------------------------------- |-------------------------------------------|
+| `requesters`  | `id`, `name`                                                                            | Separa las listas                         |
+| `categories`  | `id`, `requester_id`, `name`, `sort_order`                                              | Categorías por persona, customizables     |
+| `items`       | `id`, `category_id`, `image_url`, `brand`, `comment`, `purchased`, `created_by`         | Cada cosa pedida, con su estado de compra |
 
-No hay login de usuarios: el acceso es por link no listado (se puede sumar un
-PIN simple más adelante si hace falta más privacidad). Las políticas de
-acceso (RLS) están en `supabase/schema.sql`.
 
 ## Deploy en Vercel
 

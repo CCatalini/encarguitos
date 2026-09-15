@@ -1,114 +1,115 @@
--- Catálogo de Viaje — schema inicial
--- Correr esto una vez en el SQL Editor del proyecto de Supabase
--- (Dashboard → SQL Editor → New query → pegar y ejecutar).
+-- Trip/Errand Catalog — initial schema
+-- Run this once in the Supabase project's SQL Editor
+-- (Dashboard → SQL Editor → New query → paste and run).
 
 create extension if not exists "pgcrypto";
 
 -- ─────────────────────────────────────────────────────────
--- Tablas
+-- Tables
 -- ─────────────────────────────────────────────────────────
 
-create table if not exists hijas (
-  id uuid primary key default gen_random_uuid(),
-  nombre text not null,
-  creado_en timestamptz not null default now()
-);
+create table if not exists requesters (
+    id uuid primary key default gen_random_uuid(),
+    name text not null,
+    created_at timestamptz not null default now()
+    );
 
-create table if not exists categorias (
-  id uuid primary key default gen_random_uuid(),
-  hija_id uuid not null references hijas(id) on delete cascade,
-  nombre text not null,
-  orden integer not null default 0,
-  creado_en timestamptz not null default now()
-);
+create table if not exists categories (
+                                          id uuid primary key default gen_random_uuid(),
+    requester_id uuid not null references requesters(id) on delete cascade,
+    name text not null,
+    sort_order integer not null default 0,
+    created_at timestamptz not null default now()
+    );
 
 create table if not exists items (
-  id uuid primary key default gen_random_uuid(),
-  categoria_id uuid not null references categorias(id) on delete cascade,
-  imagen_url text,
-  marca text,
-  comentario text,
-  comprado boolean not null default false,
-  creado_por text,
-  creado_en timestamptz not null default now()
-);
+                                     id uuid primary key default gen_random_uuid(),
+    category_id uuid not null references categories(id) on delete cascade,
+    image_url text,
+    brand text,
+    comment text,
+    purchased boolean not null default false,
+    created_by text,
+    created_at timestamptz not null default now()
+    );
 
-create index if not exists categorias_hija_id_idx on categorias(hija_id);
-create index if not exists items_categoria_id_idx on items(categoria_id);
+create index if not exists categories_requester_id_idx on categories(requester_id);
+create index if not exists items_category_id_idx on items(category_id);
 
 -- ─────────────────────────────────────────────────────────
--- Datos iniciales: las dos hijas + categorías de arranque
--- Editá los nombres y agregá/sacá categorías según haga falta.
+-- Seed data: the two requesters + starter categories
+-- Edit the names and add/remove categories as needed.
+-- (Kept in Spanish so whoever reads/maintains this data does so in Spanish.)
 -- ─────────────────────────────────────────────────────────
 
-insert into hijas (nombre) values ('Cami'), ('Meli')
-on conflict do nothing;
+insert into requesters (name) values ('Cami'), ('Meli')
+    on conflict do nothing;
 
-insert into categorias (hija_id, nombre, orden)
-select h.id, c.nombre, c.orden
-from hijas h
-cross join (values
-  ('Perfume', 1),
-  ('Zapatillas', 2),
-  ('Ropa deportiva', 3),
-  ('Ropa común', 4),
-  ('Maquillaje', 5)
-) as c(nombre, orden)
-on conflict do nothing;
+insert into categories (requester_id, name, sort_order)
+select r.id, c.name, c.sort_order
+from requesters r
+         cross join (values
+                         ('Perfume', 1),
+                         ('Zapatillas', 2),
+                         ('Ropa deportiva', 3),
+                         ('Ropa común', 4),
+                         ('Maquillaje', 5)
+) as c(name, sort_order)
+    on conflict do nothing;
 
 -- ─────────────────────────────────────────────────────────
 -- Row Level Security
 --
--- No hay login de usuarios: el acceso se controla con el link
--- (no listado) más, opcionalmente, un PIN validado en la propia
--- app antes de mostrar la UI. Por eso las políticas son abiertas
--- a nivel de base — la privacidad real la da que el link no se
--- comparte públicamente. Si más adelante se agrega autenticación
--- de Supabase, estas políticas son el lugar para restringirlas.
+-- There's no user login: access is controlled by the link
+-- (unlisted) plus, optionally, a PIN validated in the app itself
+-- before showing the UI. That's why the policies are open at the
+-- database level — the real privacy comes from the link not being
+-- shared publicly. If Supabase auth is added later, these policies
+-- are the place to restrict them.
 -- ─────────────────────────────────────────────────────────
 
-alter table hijas enable row level security;
-alter table categorias enable row level security;
+alter table requesters enable row level security;
+alter table categories enable row level security;
 alter table items enable row level security;
 
-create policy "hijas: lectura pública" on hijas
+create policy "requesters: public read" on requesters
   for select using (true);
 
-create policy "categorias: lectura pública" on categorias
+create policy "categories: public read" on categories
   for select using (true);
-create policy "categorias: alta pública" on categorias
+create policy "categories: public insert" on categories
   for insert with check (true);
 
-create policy "items: lectura pública" on items
+create policy "items: public read" on items
   for select using (true);
-create policy "items: alta pública" on items
+create policy "items: public insert" on items
   for insert with check (true);
-create policy "items: edición pública" on items
+create policy "items: public update" on items
   for update using (true) with check (true);
-create policy "items: borrado público" on items
+create policy "items: public delete" on items
   for delete using (true);
 
 -- ─────────────────────────────────────────────────────────
--- Realtime: para que "comprado" se sincronice en el momento
--- entre el celular de mamá/papá y el de vos/Meli.
+-- Realtime: so "purchased" syncs instantly between mom/dad's
+-- phone and yours/your sister's.
 -- ─────────────────────────────────────────────────────────
 
 alter publication supabase_realtime add table items;
-alter publication supabase_realtime add table categorias;
+alter publication supabase_realtime add table categories;
 
 -- ─────────────────────────────────────────────────────────
--- Storage: bucket para fotos sacadas desde el celular
--- (además de pegar una URL de internet, que no necesita bucket).
+-- Storage: bucket for photos taken from the phone
+-- (in addition to pasting a URL from the internet, which needs no bucket).
 -- ─────────────────────────────────────────────────────────
 
 insert into storage.buckets (id, name, public)
-values ('item-fotos', 'item-fotos', true)
-on conflict (id) do nothing;
+values ('item-photos', 'item-photos', true)
+    on conflict (id) do nothing;
 
-create policy "item-fotos: lectura pública"
+create policy "item-photos: public read"
   on storage.objects for select
-  using (bucket_id = 'item-fotos');
+                                    using (bucket_id = 'item-photos');
 
-create policy "item-fotos: subida pública"
+create policy "item-photos: public upload"
   on storage.objects for insert
-  with check (bucket_id = 'item-fotos');
+  with check (bucket_id = 'item-photos');
