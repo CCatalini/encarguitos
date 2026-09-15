@@ -69,6 +69,7 @@ export default function RequesterPage({ params }: PageProps) {
         .from("items")
         .select("*")
         .in("category_id", categoryIds)
+        .order("sort_order")
         .order("created_at");
 
       if (cancelled) return;
@@ -134,7 +135,9 @@ export default function RequesterPage({ params }: PageProps) {
   const activeCategory =
     categories.find((c) => c.id === activeCategoryId) ?? null;
   const activeItems = activeCategory
-    ? items.filter((i) => i.category_id === activeCategory.id)
+    ? items
+        .filter((i) => i.category_id === activeCategory.id)
+        .sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at))
     : [];
 
   async function addCategory(name: string) {
@@ -162,6 +165,11 @@ export default function RequesterPage({ params }: PageProps) {
     comment: string;
   }) {
     if (!supabase || !activeCategory) return;
+    const siblings = items.filter((i) => i.category_id === activeCategory.id);
+    const nextOrder =
+      siblings.length > 0
+        ? Math.max(...siblings.map((i) => i.sort_order)) + 1
+        : 0;
     const { data, error } = await supabase
       .from("items")
       .insert({
@@ -169,6 +177,7 @@ export default function RequesterPage({ params }: PageProps) {
         image_url: input.image_url || null,
         brand: input.brand || null,
         comment: input.comment || null,
+        sort_order: nextOrder,
       })
       .select()
       .single();
@@ -177,6 +186,41 @@ export default function RequesterPage({ params }: PageProps) {
       return;
     }
     setItems((prev) => [...prev, data]);
+  }
+
+  async function moveItem(item: Item, direction: "up" | "down") {
+    if (!supabase) return;
+    const siblings = items
+      .filter((i) => i.category_id === item.category_id)
+      .sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at));
+    const index = siblings.findIndex((i) => i.id === item.id);
+    const neighborIndex = direction === "up" ? index - 1 : index + 1;
+    if (neighborIndex < 0 || neighborIndex >= siblings.length) return;
+    const neighbor = siblings[neighborIndex];
+
+    // Swap sort_order between the two neighbors, optimistically.
+    setItems((prev) =>
+      prev.map((i) => {
+        if (i.id === item.id) return { ...i, sort_order: neighbor.sort_order };
+        if (i.id === neighbor.id) return { ...i, sort_order: item.sort_order };
+        return i;
+      })
+    );
+
+    const [{ error: e1 }, { error: e2 }] = await Promise.all([
+      supabase.from("items").update({ sort_order: neighbor.sort_order }).eq("id", item.id),
+      supabase.from("items").update({ sort_order: item.sort_order }).eq("id", neighbor.id),
+    ]);
+    if (e1 || e2) {
+      setItems((prev) =>
+        prev.map((i) => {
+          if (i.id === item.id) return { ...i, sort_order: item.sort_order };
+          if (i.id === neighbor.id) return { ...i, sort_order: neighbor.sort_order };
+          return i;
+        })
+      );
+      setError((e1 ?? e2)!.message);
+    }
   }
 
   async function togglePurchased(item: Item) {
@@ -253,13 +297,17 @@ export default function RequesterPage({ params }: PageProps) {
               </p>
             )}
 
-            {activeItems.map((item) => (
+            {activeItems.map((item, index) => (
               <ItemRow
                 key={item.id}
                 item={item}
                 theme={theme}
+                isFirst={index === 0}
+                isLast={index === activeItems.length - 1}
                 onToggle={() => togglePurchased(item)}
                 onDelete={() => deleteItem(item)}
+                onMoveUp={() => moveItem(item, "up")}
+                onMoveDown={() => moveItem(item, "down")}
               />
             ))}
 
@@ -339,13 +387,21 @@ function CategoryTabs({
 function ItemRow({
   item,
   theme,
+  isFirst,
+  isLast,
   onToggle,
   onDelete,
+  onMoveUp,
+  onMoveDown,
 }: {
   item: Item;
   theme: ReturnType<typeof themeOf>;
+  isFirst: boolean;
+  isLast: boolean;
   onToggle: () => void;
   onDelete: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
 }) {
   const [imgOk, setImgOk] = useState(true);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -362,6 +418,25 @@ function ItemRow({
         item.purchased ? "opacity-60" : ""
       }`}
     >
+      <div className="flex shrink-0 flex-col">
+        <button
+          onClick={onMoveUp}
+          disabled={isFirst}
+          aria-label="Subir"
+          className="flex h-5 w-5 items-center justify-center text-stone-300 hover:text-stone-600 disabled:opacity-0"
+        >
+          ▲
+        </button>
+        <button
+          onClick={onMoveDown}
+          disabled={isLast}
+          aria-label="Bajar"
+          className="flex h-5 w-5 items-center justify-center text-stone-300 hover:text-stone-600 disabled:opacity-0"
+        >
+          ▼
+        </button>
+      </div>
+
       <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-stone-100">
         {item.image_url && imgOk ? (
           // eslint-disable-next-line @next/next/no-img-element

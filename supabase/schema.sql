@@ -38,6 +38,7 @@ create table if not exists items (
     brand text,
     comment text,
     purchased boolean not null default false,
+    sort_order integer not null default 0,
     created_by text,
     created_at timestamptz not null default now()
     );

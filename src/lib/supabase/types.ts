@@ -26,6 +26,7 @@ export type Item = {
   brand: string | null;
   comment: string | null;
   purchased: boolean;
+  sort_order: number;
   created_by: string | null;
   created_at: string;
 };
