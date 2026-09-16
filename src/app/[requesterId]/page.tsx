@@ -315,6 +315,31 @@ export default function RequesterPage({ params }: PageProps) {
     }
   }
 
+  async function updateItemText(
+    item: Item,
+    text: { brand: string | null; comment: string | null }
+  ) {
+    if (!supabase) return;
+    const prev = { brand: item.brand, comment: item.comment };
+    setItems((prevItems) =>
+      prevItems.map((i) =>
+        i.id === item.id ? { ...i, brand: text.brand, comment: text.comment } : i
+      )
+    );
+    const { error } = await supabase
+      .from("items")
+      .update({ brand: text.brand, comment: text.comment })
+      .eq("id", item.id);
+    if (error) {
+      setItems((prevItems) =>
+        prevItems.map((i) =>
+          i.id === item.id ? { ...i, brand: prev.brand, comment: prev.comment } : i
+        )
+      );
+      setError(error.message);
+    }
+  }
+
   return (
     <main className="flex flex-1 flex-col bg-stone-50">
       <header
@@ -378,6 +403,7 @@ export default function RequesterPage({ params }: PageProps) {
                 onMoveUp={() => moveItem(item, "up")}
                 onMoveDown={() => moveItem(item, "down")}
                 onUpdateImage={(imageUrl) => updateItemImage(item, imageUrl)}
+                onUpdateText={(text) => updateItemText(item, text)}
               />
             ))}
 
@@ -556,6 +582,7 @@ function ItemRow({
   onMoveUp,
   onMoveDown,
   onUpdateImage,
+  onUpdateText,
 }: {
   item: Item;
   theme: ReturnType<typeof themeOf>;
@@ -566,6 +593,7 @@ function ItemRow({
   onMoveUp: () => void;
   onMoveDown: () => void;
   onUpdateImage: (imageUrl: string | null) => void;
+  onUpdateText: (text: { brand: string | null; comment: string | null }) => void;
 }) {
   const [imgOk, setImgOk] = useState(true);
   // 0 = cerrado, -SWIPE_REVEAL = deslizado (muestra el tacho).
@@ -577,6 +605,9 @@ function ItemRow({
   const [photoDraftUrl, setPhotoDraftUrl] = useState("");
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
+  const [textEditOpen, setTextEditOpen] = useState(false);
+  const [draftBrand, setDraftBrand] = useState("");
+  const [draftComment, setDraftComment] = useState("");
   const dragStartX = useRef<number | null>(null);
   const dragStartTranslate = useRef(0);
   const draggedRef = useRef(false);
@@ -655,6 +686,36 @@ function ItemRow({
     } finally {
       setPhotoUploading(false);
     }
+  }
+
+  // Editar producto/comentario: mismo modal de fondo oscurecido que la
+  // foto (Escape o tocar afuera cierra, sin scroll de fondo).
+  useEffect(() => {
+    if (!textEditOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setTextEditOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [textEditOpen]);
+
+  function openTextEdit() {
+    setDraftBrand(item.brand ?? "");
+    setDraftComment(item.comment ?? "");
+    setTextEditOpen(true);
+  }
+
+  function saveTextEdit() {
+    onUpdateText({
+      brand: draftBrand.trim() || null,
+      comment: draftComment.trim() || null,
+    });
+    setTextEditOpen(false);
   }
 
   function handlePointerDown(e: React.PointerEvent<HTMLDivElement>) {
@@ -797,7 +858,12 @@ function ItemRow({
           </button>
         </div>
 
-        <div className="min-w-0 flex-1">
+        <button
+          type="button"
+          onClick={openTextEdit}
+          aria-label="Editar producto y comentario"
+          className="min-w-0 flex-1 text-left"
+        >
           <p
             className={`truncate text-sm font-medium ${
               item.purchased ? "text-stone-400 line-through" : "text-stone-800"
@@ -808,7 +874,7 @@ function ItemRow({
           {item.comment && (
             <p className="truncate text-xs text-stone-500">{item.comment}</p>
           )}
-        </div>
+        </button>
 
         <button
           onClick={onToggle}
@@ -939,6 +1005,57 @@ function ItemRow({
                   Quitar foto
                 </button>
               )}
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {textEditOpen &&
+        createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Editar producto y comentario"
+            onClick={() => setTextEditOpen(false)}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="flex w-full max-w-sm flex-col gap-3 rounded-xl bg-white p-4 shadow-2xl"
+            >
+              <p className="text-sm font-medium text-stone-700">Editar ítem</p>
+
+              <input
+                autoFocus
+                value={draftBrand}
+                onChange={(e) => setDraftBrand(e.target.value)}
+                placeholder="Producto"
+                className="rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-stone-400"
+              />
+              <textarea
+                value={draftComment}
+                onChange={(e) => setDraftComment(e.target.value)}
+                placeholder="Comentario (opcional) — talle, color, alguna aclaración"
+                rows={2}
+                className="resize-none rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-stone-400"
+              />
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={saveTextEdit}
+                  className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium text-white ${theme.accentBg} ${theme.accentBgHover}`}
+                >
+                  Guardar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTextEditOpen(false)}
+                  className="rounded-lg border border-stone-300 px-4 py-2 text-sm text-stone-500"
+                >
+                  Cancelar
+                </button>
+              </div>
             </div>
           </div>,
           document.body
