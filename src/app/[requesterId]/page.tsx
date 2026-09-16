@@ -6,7 +6,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
 import type { Category, Item, Requester } from "@/lib/supabase/types";
 import { themeOf } from "@/lib/theme";
-import { CheckIcon, PencilIcon, TrashIcon } from "@/components/icons";
+import { CheckIcon, ImageIcon, PencilIcon, TrashIcon } from "@/components/icons";
 
 type PageProps = {
   params: Promise<{ requesterId: string }>;
@@ -766,6 +766,9 @@ function ItemRow({
   );
 }
 
+// Extensión máxima aceptada para una foto subida desde la galería (5 MB).
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+
 function AddItemForm({
   theme,
   onAdd,
@@ -777,6 +780,9 @@ function AddItemForm({
   const [imageUrl, setImageUrl] = useState("");
   const [brand, setBrand] = useState("");
   const [comment, setComment] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -785,7 +791,39 @@ function AddItemForm({
     setImageUrl("");
     setBrand("");
     setComment("");
+    setUploadError(null);
     setOpen(false);
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !supabase) return;
+
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setUploadError("La foto pesa más de 5 MB. Probá con otra o achicala.");
+      return;
+    }
+
+    setUploading(true);
+    setUploadError(null);
+
+    const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
+    const path = `${crypto.randomUUID()}.${ext}`;
+
+    const { error: uploadErr } = await supabase.storage
+      .from("item-photos")
+      .upload(path, file, { contentType: file.type || undefined });
+
+    if (uploadErr) {
+      setUploadError("No se pudo subir la foto. Probá de nuevo.");
+      setUploading(false);
+      return;
+    }
+
+    const { data } = supabase.storage.from("item-photos").getPublicUrl(path);
+    setImageUrl(data.publicUrl);
+    setUploading(false);
   }
 
   if (!open) {
@@ -828,6 +866,28 @@ function AddItemForm({
         placeholder="Link de una imagen (opcional)"
         className={`rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:ring-2 ${theme.ring}`}
       />
+      <div className="flex items-center gap-2">
+        <div className="h-px flex-1 bg-stone-300" />
+        <span className="text-xs text-stone-400">o</span>
+        <div className="h-px flex-1 bg-stone-300" />
+      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileChange}
+        className="hidden"
+      />
+      <button
+        type="button"
+        onClick={() => fileInputRef.current?.click()}
+        disabled={uploading}
+        className="flex items-center justify-center gap-2 rounded-lg border border-stone-300 px-3 py-2 text-sm text-stone-600 transition hover:bg-stone-100 disabled:cursor-wait disabled:opacity-60"
+      >
+        <ImageIcon className="h-4 w-4" />
+        {uploading ? "Subiendo…" : "Elegir foto de la galería"}
+      </button>
+      {uploadError && <p className="text-xs text-red-600">{uploadError}</p>}
       <textarea
         value={comment}
         onChange={(e) => setComment(e.target.value)}
@@ -838,7 +898,8 @@ function AddItemForm({
       <div className="flex gap-2">
         <button
           type="submit"
-          className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium text-white ${theme.accentBg} ${theme.accentBgHover}`}
+          disabled={uploading}
+          className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium text-white disabled:cursor-wait disabled:opacity-60 ${theme.accentBg} ${theme.accentBgHover}`}
         >
           Guardar
         </button>
