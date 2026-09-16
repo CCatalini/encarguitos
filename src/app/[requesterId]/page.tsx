@@ -6,7 +6,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
 import type { Category, Item, Requester } from "@/lib/supabase/types";
 import { themeOf } from "@/lib/theme";
-import { CheckIcon, ImageIcon, PencilIcon, TrashIcon } from "@/components/icons";
+import { CheckIcon, DotsIcon, ImageIcon, PencilIcon, PlusIcon, TrashIcon } from "@/components/icons";
 import { uploadItemPhoto } from "@/lib/uploadPhoto";
 
 type PageProps = {
@@ -480,13 +480,33 @@ function CategoryTabs({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const confirmingDelete = confirmDeleteId !== null && confirmDeleteId === activeId;
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!confirmingDelete) return;
     const timeout = setTimeout(() => setConfirmDeleteId(null), 3000);
     return () => clearTimeout(timeout);
   }, [confirmingDelete]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handlePointerDown(e: PointerEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setMenuOpen(false);
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [menuOpen]);
 
   function submit() {
     const trimmed = name.trim();
@@ -516,6 +536,7 @@ function CategoryTabs({
       return;
     }
     setConfirmDeleteId(null);
+    setMenuOpen(false);
     onDelete(activeId);
   }
 
@@ -556,10 +577,8 @@ function CategoryTabs({
             </button>
           )
         )}
-      </div>
 
-      <div className="flex shrink-0 items-center gap-1">
-        {adding ? (
+        {adding && (
           <input
             autoFocus
             value={name}
@@ -575,62 +594,92 @@ function CategoryTabs({
             placeholder="Nombre de la categoría"
             className="w-40 shrink-0 rounded-full border border-stone-300 px-4 py-1.5 text-sm outline-none"
           />
-        ) : (
-          <button
-            onClick={() => setAdding(true)}
-            className="shrink-0 rounded-full border border-dashed border-stone-300 px-4 py-1.5 text-sm text-stone-400 hover:border-stone-400 hover:text-stone-600"
-          >
-            + Categoría
-          </button>
         )}
+      </div>
 
+      <div ref={menuRef} className="relative shrink-0">
         <button
           type="button"
-          onClick={() => activeId && onMove(activeId, "up")}
-          disabled={!activeCategory || isFirstActive}
-          aria-label="Mover categoría a la izquierda"
-          className="flex h-8 w-6 shrink-0 items-center justify-center text-stone-400 hover:text-stone-600 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:text-stone-400"
-        >
-          ◀
-        </button>
-        <button
-          type="button"
-          onClick={() => activeId && onMove(activeId, "down")}
-          disabled={!activeCategory || isLastActive}
-          aria-label="Mover categoría a la derecha"
-          className="flex h-8 w-6 shrink-0 items-center justify-center text-stone-400 hover:text-stone-600 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:text-stone-400"
-        >
-          ▶
-        </button>
-
-        <button
-          type="button"
-          onClick={() => activeCategory && startEditing(activeCategory.id, activeCategory.name)}
-          disabled={!activeCategory}
-          aria-label="Editar categoría"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-stone-400 transition hover:bg-stone-100 hover:text-stone-600 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
-        >
-          <PencilIcon />
-        </button>
-
-        <button
-          type="button"
-          onClick={handleTrashClick}
-          disabled={!activeCategory}
-          aria-label={confirmingDelete ? "Confirmar borrado de categoría" : "Borrar categoría"}
-          className={`flex h-8 shrink-0 items-center justify-center gap-1 rounded-full px-2 transition disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent ${
-            confirmingDelete
-              ? "bg-[#c53030] text-white hover:bg-[#b32d2d]"
-              : "text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+          onClick={() => setMenuOpen((v) => !v)}
+          aria-label="Opciones de categorías"
+          aria-expanded={menuOpen}
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition ${
+            menuOpen ? "bg-stone-100 text-stone-600" : "text-stone-400 hover:bg-stone-100 hover:text-stone-600"
           }`}
         >
-          {confirmingDelete ? <CheckIcon className="h-4 w-4" /> : <TrashIcon className="h-4 w-4" />}
-          {confirmingDelete && <span className="text-xs font-bold">¿Seguro?</span>}
+          <DotsIcon />
         </button>
+
+        {menuOpen && (
+          <div className="absolute right-0 top-full z-20 mt-2 w-60 overflow-hidden rounded-xl border border-stone-200 bg-white py-1 shadow-lg">
+            <button
+              type="button"
+              onClick={() => {
+                setAdding(true);
+                setMenuOpen(false);
+              }}
+              className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-stone-700 hover:bg-stone-50"
+            >
+              <PlusIcon />
+              Agregar categoría
+            </button>
+
+            <div className="flex items-center justify-between px-4 py-2.5 text-sm text-stone-700">
+              <span>Reordenar</span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => activeId && onMove(activeId, "up")}
+                  disabled={!activeCategory || isFirstActive}
+                  aria-label="Mover categoría a la izquierda"
+                  className="flex h-8 w-8 items-center justify-center rounded-full text-stone-500 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+                >
+                  ◀
+                </button>
+                <button
+                  type="button"
+                  onClick={() => activeId && onMove(activeId, "down")}
+                  disabled={!activeCategory || isLastActive}
+                  aria-label="Mover categoría a la derecha"
+                  className="flex h-8 w-8 items-center justify-center rounded-full text-stone-500 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+                >
+                  ▶
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (!activeCategory) return;
+                startEditing(activeCategory.id, activeCategory.name);
+                setMenuOpen(false);
+              }}
+              disabled={!activeCategory}
+              className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-stone-700 hover:bg-stone-50 disabled:cursor-not-allowed disabled:text-stone-300 disabled:hover:bg-transparent"
+            >
+              <PencilIcon />
+              Editar nombre
+            </button>
+
+            <button
+              type="button"
+              onClick={handleTrashClick}
+              disabled={!activeCategory}
+              className={`flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm transition disabled:cursor-not-allowed disabled:text-stone-300 disabled:hover:bg-transparent ${
+                confirmingDelete ? "bg-[#c53030] text-white hover:bg-[#b32d2d]" : "text-[#c53030] hover:bg-stone-50"
+              }`}
+            >
+              {confirmingDelete ? <CheckIcon className="h-4 w-4" /> : <TrashIcon className="h-4 w-4" />}
+              {confirmingDelete ? "¿Seguro? Confirmar borrado" : "Borrar categoría"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
 }
+
 
 // Cuánto se desliza la fila para revelar el tacho (px).
 const SWIPE_REVEAL = 88;
