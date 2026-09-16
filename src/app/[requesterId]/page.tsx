@@ -135,6 +135,9 @@ export default function RequesterPage({ params }: PageProps) {
   }
 
   const theme = themeOf(requester.color);
+  const sortedCategories = [...categories].sort(
+    (a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at)
+  );
   const activeCategory =
     categories.find((c) => c.id === activeCategoryId) ?? null;
   const activeItems = activeCategory
@@ -192,6 +195,43 @@ export default function RequesterPage({ params }: PageProps) {
       setCategories(prevCategories);
       setItems(prevItems);
       setError(error.message);
+    }
+  }
+
+  async function moveCategory(id: string, direction: "up" | "down") {
+    if (!supabase) return;
+    const sorted = [...categories].sort(
+      (a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at)
+    );
+    const index = sorted.findIndex((c) => c.id === id);
+    if (index === -1) return;
+    const neighborIndex = direction === "up" ? index - 1 : index + 1;
+    if (neighborIndex < 0 || neighborIndex >= sorted.length) return;
+    const category = sorted[index];
+    const neighbor = sorted[neighborIndex];
+
+    // Swap sort_order between the two neighbors, optimistically.
+    setCategories((prev) =>
+      prev.map((c) => {
+        if (c.id === category.id) return { ...c, sort_order: neighbor.sort_order };
+        if (c.id === neighbor.id) return { ...c, sort_order: category.sort_order };
+        return c;
+      })
+    );
+
+    const [{ error: e1 }, { error: e2 }] = await Promise.all([
+      supabase.from("categories").update({ sort_order: neighbor.sort_order }).eq("id", category.id),
+      supabase.from("categories").update({ sort_order: category.sort_order }).eq("id", neighbor.id),
+    ]);
+    if (e1 || e2) {
+      setCategories((prev) =>
+        prev.map((c) => {
+          if (c.id === category.id) return { ...c, sort_order: category.sort_order };
+          if (c.id === neighbor.id) return { ...c, sort_order: neighbor.sort_order };
+          return c;
+        })
+      );
+      setError((e1 ?? e2)!.message);
     }
   }
 
@@ -366,12 +406,13 @@ export default function RequesterPage({ params }: PageProps) {
       </header>
 
       <CategoryTabs
-        categories={categories}
+        categories={sortedCategories}
         activeId={activeCategoryId}
         onSelect={setActiveCategoryId}
         onAdd={addCategory}
         onRename={renameCategory}
         onDelete={deleteCategory}
+        onMove={moveCategory}
         theme={theme}
       />
 
@@ -422,6 +463,7 @@ function CategoryTabs({
   onAdd,
   onRename,
   onDelete,
+  onMove,
   theme,
 }: {
   categories: Category[];
@@ -430,6 +472,7 @@ function CategoryTabs({
   onAdd: (name: string) => void;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
+  onMove: (id: string, direction: "up" | "down") => void;
   theme: ReturnType<typeof themeOf>;
 }) {
   const [adding, setAdding] = useState(false);
@@ -477,6 +520,9 @@ function CategoryTabs({
   }
 
   const activeCategory = categories.find((c) => c.id === activeId) ?? null;
+  const activeIndex = activeId ? categories.findIndex((c) => c.id === activeId) : -1;
+  const isFirstActive = activeIndex <= 0;
+  const isLastActive = activeIndex === -1 || activeIndex === categories.length - 1;
 
   return (
     <div className="flex items-center gap-2 border-b border-stone-200 bg-white px-4 py-3">
@@ -537,6 +583,25 @@ function CategoryTabs({
             + Categoría
           </button>
         )}
+
+        <button
+          type="button"
+          onClick={() => activeId && onMove(activeId, "up")}
+          disabled={!activeCategory || isFirstActive}
+          aria-label="Mover categoría a la izquierda"
+          className="flex h-8 w-6 shrink-0 items-center justify-center text-stone-400 hover:text-stone-600 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:text-stone-400"
+        >
+          ◀
+        </button>
+        <button
+          type="button"
+          onClick={() => activeId && onMove(activeId, "down")}
+          disabled={!activeCategory || isLastActive}
+          aria-label="Mover categoría a la derecha"
+          className="flex h-8 w-6 shrink-0 items-center justify-center text-stone-400 hover:text-stone-600 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:text-stone-400"
+        >
+          ▶
+        </button>
 
         <button
           type="button"
