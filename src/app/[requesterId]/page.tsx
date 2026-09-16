@@ -840,7 +840,7 @@ function ItemRow({
   }
 
   return (
-    <div className={`relative overflow-hidden rounded-xl border shadow-sm ${theme.softBorder}`}>
+    <div data-testid="item-row" className={`relative overflow-hidden rounded-xl border shadow-sm ${theme.softBorder}`}>
       <div className="absolute inset-y-0 right-0 flex items-stretch">
         <button
           onClick={handleTrashTap}
