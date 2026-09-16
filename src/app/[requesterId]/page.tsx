@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase/client";
 import type { Category, Item, Requester } from "@/lib/supabase/types";
 import { themeOf } from "@/lib/theme";
 import { CheckIcon, ImageIcon, PencilIcon, TrashIcon } from "@/components/icons";
+import { uploadItemPhoto } from "@/lib/uploadPhoto";
 
 type PageProps = {
   params: Promise<{ requesterId: string }>;
@@ -296,6 +297,24 @@ export default function RequesterPage({ params }: PageProps) {
     if (error) setError(error.message);
   }
 
+  async function updateItemImage(item: Item, imageUrl: string | null) {
+    if (!supabase) return;
+    const prevUrl = item.image_url;
+    setItems((prev) =>
+      prev.map((i) => (i.id === item.id ? { ...i, image_url: imageUrl } : i))
+    );
+    const { error } = await supabase
+      .from("items")
+      .update({ image_url: imageUrl })
+      .eq("id", item.id);
+    if (error) {
+      setItems((prev) =>
+        prev.map((i) => (i.id === item.id ? { ...i, image_url: prevUrl } : i))
+      );
+      setError(error.message);
+    }
+  }
+
   return (
     <main className="flex flex-1 flex-col bg-stone-50">
       <header
@@ -358,6 +377,7 @@ export default function RequesterPage({ params }: PageProps) {
                 onDelete={() => deleteItem(item)}
                 onMoveUp={() => moveItem(item, "up")}
                 onMoveDown={() => moveItem(item, "down")}
+                onUpdateImage={(imageUrl) => updateItemImage(item, imageUrl)}
               />
             ))}
 
@@ -535,6 +555,7 @@ function ItemRow({
   onDelete,
   onMoveUp,
   onMoveDown,
+  onUpdateImage,
 }: {
   item: Item;
   theme: ReturnType<typeof themeOf>;
@@ -544,6 +565,7 @@ function ItemRow({
   onDelete: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
+  onUpdateImage: (imageUrl: string | null) => void;
 }) {
   const [imgOk, setImgOk] = useState(true);
   // 0 = cerrado, -SWIPE_REVEAL = deslizado (muestra el tacho).
@@ -551,9 +573,14 @@ function ItemRow({
   const [dragging, setDragging] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [photoEditOpen, setPhotoEditOpen] = useState(false);
+  const [photoDraftUrl, setPhotoDraftUrl] = useState("");
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
   const dragStartX = useRef<number | null>(null);
   const dragStartTranslate = useRef(0);
   const draggedRef = useRef(false);
+  const photoFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!confirming) return;
@@ -579,6 +606,56 @@ function ItemRow({
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [lightboxOpen]);
+
+  // Editar foto: mismo comportamiento de modal que la vista ampliada
+  // (fondo oscurecido, Escape o tocar afuera para cerrar, sin scroll
+  // de fondo).
+  useEffect(() => {
+    if (!photoEditOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setPhotoEditOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [photoEditOpen]);
+
+  function openPhotoEdit() {
+    setPhotoDraftUrl(item.image_url ?? "");
+    setPhotoUploadError(null);
+    setPhotoEditOpen(true);
+  }
+
+  function savePhotoEdit() {
+    const trimmed = photoDraftUrl.trim();
+    onUpdateImage(trimmed || null);
+    setPhotoEditOpen(false);
+  }
+
+  function removePhoto() {
+    onUpdateImage(null);
+    setPhotoEditOpen(false);
+  }
+
+  async function handlePhotoFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setPhotoUploading(true);
+    setPhotoUploadError(null);
+    try {
+      const url = await uploadItemPhoto(file);
+      setPhotoDraftUrl(url);
+    } catch (err) {
+      setPhotoUploadError(err instanceof Error ? err.message : "No se pudo subir la foto.");
+    } finally {
+      setPhotoUploading(false);
+    }
+  }
 
   function handlePointerDown(e: React.PointerEvent<HTMLDivElement>) {
     dragStartX.current = e.clientX;
@@ -686,29 +763,39 @@ function ItemRow({
           </button>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            if (item.image_url && imgOk) setLightboxOpen(true);
-          }}
-          aria-label={item.image_url && imgOk ? "Ver imagen más grande" : undefined}
-          disabled={!item.image_url || !imgOk}
-          className={`flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-stone-100 ${
-            item.purchased ? "opacity-50" : ""
-          }`}
-        >
-          {item.image_url && imgOk ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={item.image_url}
-              alt={item.brand ?? ""}
-              className="h-full w-full object-cover"
-              onError={() => setImgOk(false)}
-            />
-          ) : (
-            <span className="text-lg text-stone-300">···</span>
-          )}
-        </button>
+        <div className="relative shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              if (item.image_url && imgOk) setLightboxOpen(true);
+            }}
+            aria-label={item.image_url && imgOk ? "Ver imagen más grande" : undefined}
+            disabled={!item.image_url || !imgOk}
+            className={`flex h-14 w-14 items-center justify-center overflow-hidden rounded-lg bg-stone-100 ${
+              item.purchased ? "opacity-50" : ""
+            }`}
+          >
+            {item.image_url && imgOk ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={item.image_url}
+                alt={item.brand ?? ""}
+                className="h-full w-full object-cover"
+                onError={() => setImgOk(false)}
+              />
+            ) : (
+              <span className="text-lg text-stone-300">···</span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={openPhotoEdit}
+            aria-label={item.image_url ? "Cambiar o quitar la foto" : "Agregar una foto"}
+            className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 shadow-sm hover:text-stone-700"
+          >
+            <PencilIcon className="h-3 w-3" />
+          </button>
+        </div>
 
         <div className="min-w-0 flex-1">
           <p
@@ -762,12 +849,103 @@ function ItemRow({
           </div>,
           document.body
         )}
+
+      {photoEditOpen &&
+        createPortal(
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Editar foto"
+            onClick={() => setPhotoEditOpen(false)}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="flex w-full max-w-sm flex-col gap-3 rounded-xl bg-white p-4 shadow-2xl"
+            >
+              <p className="text-sm font-medium text-stone-700">
+                Foto de &quot;{item.brand || "este ítem"}&quot;
+              </p>
+
+              {photoDraftUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={photoDraftUrl}
+                  alt=""
+                  className="h-24 w-24 self-center rounded-lg object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = "none";
+                  }}
+                />
+              )}
+
+              <input
+                value={photoDraftUrl}
+                onChange={(e) => setPhotoDraftUrl(e.target.value)}
+                placeholder="Link de una imagen"
+                className="rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-stone-400"
+              />
+
+              <div className="flex items-center gap-2">
+                <div className="h-px flex-1 bg-stone-300" />
+                <span className="text-xs text-stone-400">o</span>
+                <div className="h-px flex-1 bg-stone-300" />
+              </div>
+
+              <input
+                ref={photoFileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handlePhotoFileChange}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => photoFileInputRef.current?.click()}
+                disabled={photoUploading}
+                className="flex items-center justify-center gap-2 rounded-lg border border-stone-300 px-3 py-2 text-sm text-stone-600 transition hover:bg-stone-100 disabled:cursor-wait disabled:opacity-60"
+              >
+                <ImageIcon className="h-4 w-4" />
+                {photoUploading ? "Subiendo…" : "Elegir foto de la galería"}
+              </button>
+              {photoUploadError && (
+                <p className="text-xs text-red-600">{photoUploadError}</p>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={savePhotoEdit}
+                  disabled={photoUploading}
+                  className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium text-white disabled:cursor-wait disabled:opacity-60 ${theme.accentBg} ${theme.accentBgHover}`}
+                >
+                  Guardar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPhotoEditOpen(false)}
+                  className="rounded-lg border border-stone-300 px-4 py-2 text-sm text-stone-500"
+                >
+                  Cancelar
+                </button>
+              </div>
+
+              {item.image_url && (
+                <button
+                  type="button"
+                  onClick={removePhoto}
+                  className="text-xs font-medium text-red-600 hover:text-red-700"
+                >
+                  Quitar foto
+                </button>
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
-
-// Extensión máxima aceptada para una foto subida desde la galería (5 MB).
-const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 function AddItemForm({
   theme,
@@ -798,32 +976,18 @@ function AddItemForm({
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
-    if (!file || !supabase) return;
-
-    if (file.size > MAX_UPLOAD_BYTES) {
-      setUploadError("La foto pesa más de 5 MB. Probá con otra o achicala.");
-      return;
-    }
+    if (!file) return;
 
     setUploading(true);
     setUploadError(null);
-
-    const ext = file.name.split(".").pop()?.toLowerCase() || "jpg";
-    const path = `${crypto.randomUUID()}.${ext}`;
-
-    const { error: uploadErr } = await supabase.storage
-      .from("item-photos")
-      .upload(path, file, { contentType: file.type || undefined });
-
-    if (uploadErr) {
-      setUploadError("No se pudo subir la foto. Probá de nuevo.");
+    try {
+      const url = await uploadItemPhoto(file);
+      setImageUrl(url);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "No se pudo subir la foto.");
+    } finally {
       setUploading(false);
-      return;
     }
-
-    const { data } = supabase.storage.from("item-photos").getPublicUrl(path);
-    setImageUrl(data.publicUrl);
-    setUploading(false);
   }
 
   if (!open) {
