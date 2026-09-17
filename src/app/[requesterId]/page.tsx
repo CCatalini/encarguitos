@@ -4,7 +4,7 @@ import { use, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase/client";
-import type { Category, Item, Requester } from "@/lib/supabase/types";
+import type { Category, Item, ItemImage, Requester } from "@/lib/supabase/types";
 import { themeOf } from "@/lib/theme";
 import { CheckIcon, DotsIcon, ImageIcon, PencilIcon, PlusIcon, TrashIcon } from "@/components/icons";
 import { uploadItemPhoto } from "@/lib/uploadPhoto";
@@ -21,6 +21,7 @@ export default function RequesterPage({ params }: PageProps) {
   );
   const [categories, setCategories] = useState<Category[]>([]);
   const [items, setItems] = useState<Item[]>([]);
+  const [itemImages, setItemImages] = useState<ItemImage[]>([]);
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(
     null
   );
@@ -81,6 +82,26 @@ export default function RequesterPage({ params }: PageProps) {
         return;
       }
       setItems(its ?? []);
+
+      const itemIds = (its ?? []).map((i) => i.id);
+      if (itemIds.length === 0) {
+        setItemImages([]);
+        return;
+      }
+
+      const { data: imgs, error: imgsError } = await supabase!
+        .from("item_images")
+        .select("*")
+        .in("item_id", itemIds)
+        .order("sort_order")
+        .order("created_at");
+
+      if (cancelled) return;
+      if (imgsError) {
+        setError(imgsError.message);
+        return;
+      }
+      setItemImages(imgs ?? []);
     }
 
     load();
@@ -97,6 +118,11 @@ export default function RequesterPage({ params }: PageProps) {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "items" },
+        () => load()
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "item_images" },
         () => load()
       )
       .subscribe();
@@ -236,7 +262,7 @@ export default function RequesterPage({ params }: PageProps) {
   }
 
   async function addItem(input: {
-    image_url: string;
+    imageUrls: string[];
     brand: string;
     comment: string;
   }) {
@@ -250,7 +276,6 @@ export default function RequesterPage({ params }: PageProps) {
       .from("items")
       .insert({
         category_id: activeCategory.id,
-        image_url: input.image_url || null,
         brand: input.brand || null,
         comment: input.comment || null,
         sort_order: nextOrder,
@@ -262,6 +287,9 @@ export default function RequesterPage({ params }: PageProps) {
       return;
     }
     setItems((prev) => [...prev, data]);
+    if (input.imageUrls.length > 0) {
+      await addItemImages(data.id, input.imageUrls);
+    }
   }
 
   async function moveItem(item: Item, direction: "up" | "down") {
@@ -337,19 +365,35 @@ export default function RequesterPage({ params }: PageProps) {
     if (error) setError(error.message);
   }
 
-  async function updateItemImage(item: Item, imageUrl: string | null) {
-    if (!supabase) return;
-    const prevUrl = item.image_url;
-    setItems((prev) =>
-      prev.map((i) => (i.id === item.id ? { ...i, image_url: imageUrl } : i))
-    );
-    const { error } = await supabase
-      .from("items")
-      .update({ image_url: imageUrl })
-      .eq("id", item.id);
+  async function addItemImages(itemId: string, urls: string[]) {
+    if (!supabase || urls.length === 0) return;
+    const siblings = itemImages.filter((img) => img.item_id === itemId);
+    const startOrder =
+      siblings.length > 0 ? Math.max(...siblings.map((img) => img.sort_order)) + 1 : 0;
+    const { data, error } = await supabase
+      .from("item_images")
+      .insert(
+        urls.map((url, index) => ({
+          item_id: itemId,
+          url,
+          sort_order: startOrder + index,
+        }))
+      )
+      .select();
     if (error) {
-      setItems((prev) =>
-        prev.map((i) => (i.id === item.id ? { ...i, image_url: prevUrl } : i))
+      setError(error.message);
+      return;
+    }
+    setItemImages((prev) => [...prev, ...(data ?? [])]);
+  }
+
+  async function deleteItemImage(image: ItemImage) {
+    if (!supabase) return;
+    setItemImages((prev) => prev.filter((img) => img.id !== image.id));
+    const { error } = await supabase.from("item_images").delete().eq("id", image.id);
+    if (error) {
+      setItemImages((prev) =>
+        [...prev, image].sort((a, b) => a.sort_order - b.sort_order)
       );
       setError(error.message);
     }
@@ -432,21 +476,28 @@ export default function RequesterPage({ params }: PageProps) {
               </p>
             )}
 
-            {activeItems.map((item, index) => (
-              <ItemRow
-                key={item.id}
-                item={item}
-                theme={theme}
-                isFirst={index === 0}
-                isLast={index === activeItems.length - 1}
-                onToggle={() => togglePurchased(item)}
-                onDelete={() => deleteItem(item)}
-                onMoveUp={() => moveItem(item, "up")}
-                onMoveDown={() => moveItem(item, "down")}
-                onUpdateImage={(imageUrl) => updateItemImage(item, imageUrl)}
-                onUpdateText={(text) => updateItemText(item, text)}
-              />
-            ))}
+            {activeItems.map((item, index) => {
+              const images = itemImages
+                .filter((img) => img.item_id === item.id)
+                .sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at));
+              return (
+                <ItemRow
+                  key={item.id}
+                  item={item}
+                  images={images}
+                  theme={theme}
+                  isFirst={index === 0}
+                  isLast={index === activeItems.length - 1}
+                  onToggle={() => togglePurchased(item)}
+                  onDelete={() => deleteItem(item)}
+                  onMoveUp={() => moveItem(item, "up")}
+                  onMoveDown={() => moveItem(item, "down")}
+                  onAddImages={(urls) => addItemImages(item.id, urls)}
+                  onDeleteImage={(image) => deleteItemImage(image)}
+                  onUpdateText={(text) => updateItemText(item, text)}
+                />
+              );
+            })}
 
             <AddItemForm theme={theme} onAdd={addItem} />
           </div>
@@ -688,6 +739,7 @@ const SWIPE_DRAG_THRESHOLD = 6;
 
 function ItemRow({
   item,
+  images,
   theme,
   isFirst,
   isLast,
@@ -695,10 +747,12 @@ function ItemRow({
   onDelete,
   onMoveUp,
   onMoveDown,
-  onUpdateImage,
+  onAddImages,
+  onDeleteImage,
   onUpdateText,
 }: {
   item: Item;
+  images: ItemImage[];
   theme: ReturnType<typeof themeOf>;
   isFirst: boolean;
   isLast: boolean;
@@ -706,7 +760,8 @@ function ItemRow({
   onDelete: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
-  onUpdateImage: (imageUrl: string | null) => void;
+  onAddImages: (urls: string[]) => void;
+  onDeleteImage: (image: ItemImage) => void;
   onUpdateText: (text: { brand: string | null; comment: string | null }) => void;
 }) {
   const [imgOk, setImgOk] = useState(true);
@@ -715,8 +770,9 @@ function ItemRow({
   const [dragging, setDragging] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
   const [photoEditOpen, setPhotoEditOpen] = useState(false);
-  const [photoDraftUrl, setPhotoDraftUrl] = useState("");
+  const [linkUrl, setLinkUrl] = useState("");
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
   const [textEditOpen, setTextEditOpen] = useState(false);
@@ -726,6 +782,8 @@ function ItemRow({
   const dragStartTranslate = useRef(0);
   const draggedRef = useRef(false);
   const photoFileInputRef = useRef<HTMLInputElement>(null);
+
+  const cover = images[0];
 
   useEffect(() => {
     if (!confirming) return;
@@ -744,15 +802,17 @@ function ItemRow({
     document.body.style.overflow = "hidden";
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") setLightboxOpen(false);
+      if (e.key === "ArrowLeft") setLightboxIndex((i) => Math.max(0, i - 1));
+      if (e.key === "ArrowRight") setLightboxIndex((i) => Math.min(images.length - 1, i + 1));
     }
     window.addEventListener("keydown", onKeyDown);
     return () => {
       document.body.style.overflow = prevOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [lightboxOpen]);
+  }, [lightboxOpen, images.length]);
 
-  // Editar foto: mismo comportamiento de modal que la vista ampliada
+  // Editar fotos: mismo comportamiento de modal que la vista ampliada
   // (fondo oscurecido, Escape o tocar afuera para cerrar, sin scroll
   // de fondo).
   useEffect(() => {
@@ -769,37 +829,41 @@ function ItemRow({
     };
   }, [photoEditOpen]);
 
+  function openLightbox(index: number) {
+    setLightboxIndex(index);
+    setLightboxOpen(true);
+  }
+
   function openPhotoEdit() {
-    setPhotoDraftUrl(item.image_url ?? "");
+    setLinkUrl("");
     setPhotoUploadError(null);
     setPhotoEditOpen(true);
   }
 
-  function savePhotoEdit() {
-    const trimmed = photoDraftUrl.trim();
-    onUpdateImage(trimmed || null);
-    setPhotoEditOpen(false);
-  }
-
-  function removePhoto() {
-    onUpdateImage(null);
-    setPhotoEditOpen(false);
-  }
-
-  async function handlePhotoFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+  async function handlePhotoFilesChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (!file) return;
+    if (files.length === 0) return;
     setPhotoUploading(true);
     setPhotoUploadError(null);
     try {
-      const url = await uploadItemPhoto(file);
-      setPhotoDraftUrl(url);
+      const urls: string[] = [];
+      for (const file of files) {
+        urls.push(await uploadItemPhoto(file));
+      }
+      onAddImages(urls);
     } catch (err) {
       setPhotoUploadError(err instanceof Error ? err.message : "No se pudo subir la foto.");
     } finally {
       setPhotoUploading(false);
     }
+  }
+
+  function addLink() {
+    const trimmed = linkUrl.trim();
+    if (!trimmed) return;
+    onAddImages([trimmed]);
+    setLinkUrl("");
   }
 
   // Editar producto/comentario: mismo modal de fondo oscurecido que la
@@ -915,7 +979,7 @@ function ItemRow({
           transition: dragging ? "none" : "transform 200ms ease",
           touchAction: "pan-y",
         }}
-        className={`relative flex items-center gap-3 p-3 ${
+        className={`relative flex items-center gap-4 p-4 ${
           item.purchased ? "bg-stone-50" : "bg-white"
         }`}
       >
@@ -924,7 +988,7 @@ function ItemRow({
             onClick={onMoveUp}
             disabled={isFirst}
             aria-label="Subir"
-            className="flex h-5 w-5 items-center justify-center text-stone-300 hover:text-stone-600 disabled:opacity-0"
+            className="flex h-6 w-6 items-center justify-center text-stone-300 hover:text-stone-600 disabled:opacity-0"
           >
             ▲
           </button>
@@ -932,7 +996,7 @@ function ItemRow({
             onClick={onMoveDown}
             disabled={isLast}
             aria-label="Bajar"
-            className="flex h-5 w-5 items-center justify-center text-stone-300 hover:text-stone-600 disabled:opacity-0"
+            className="flex h-6 w-6 items-center justify-center text-stone-300 hover:text-stone-600 disabled:opacity-0"
           >
             ▼
           </button>
@@ -942,33 +1006,44 @@ function ItemRow({
           <button
             type="button"
             onClick={() => {
-              if (item.image_url && imgOk) setLightboxOpen(true);
+              if (cover && imgOk) openLightbox(0);
             }}
-            aria-label={item.image_url && imgOk ? "Ver imagen más grande" : undefined}
-            disabled={!item.image_url || !imgOk}
-            className={`flex h-14 w-14 items-center justify-center overflow-hidden rounded-lg bg-stone-100 ${
+            aria-label={cover && imgOk ? "Ver imagen más grande" : undefined}
+            disabled={!cover || !imgOk}
+            className={`relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-lg bg-stone-100 ${
               item.purchased ? "opacity-50" : ""
             }`}
           >
-            {item.image_url && imgOk ? (
+            {cover && imgOk ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={item.image_url}
+                src={cover.url}
                 alt={item.brand ?? ""}
                 className="h-full w-full object-cover"
                 onError={() => setImgOk(false)}
               />
             ) : (
-              <span className="text-lg text-stone-300">···</span>
+              <span className="text-xl text-stone-300">···</span>
+            )}
+
+            {images.length > 1 && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-1.5 flex justify-center gap-1">
+                {images.map((img, i) => (
+                  <span
+                    key={img.id}
+                    className={`h-1 w-1 rounded-full ${i === 0 ? "bg-white" : "bg-white/50"}`}
+                  />
+                ))}
+              </div>
             )}
           </button>
           <button
             type="button"
             onClick={openPhotoEdit}
-            aria-label={item.image_url ? "Cambiar o quitar la foto" : "Agregar una foto"}
-            className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 shadow-sm hover:text-stone-700"
+            aria-label={images.length > 0 ? "Editar fotos" : "Agregar fotos"}
+            className="absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 shadow-sm hover:text-stone-700"
           >
-            <PencilIcon className="h-3 w-3" />
+            <PencilIcon className="h-3.5 w-3.5" />
           </button>
         </div>
 
@@ -979,14 +1054,14 @@ function ItemRow({
           className="min-w-0 flex-1 text-left"
         >
           <p
-            className={`truncate text-sm font-medium ${
+            className={`truncate text-base font-medium ${
               item.purchased ? "text-stone-400 line-through" : "text-stone-800"
             }`}
           >
             {item.brand || "Sin producto"}
           </p>
           {item.comment && (
-            <p className="truncate text-xs text-stone-500">{item.comment}</p>
+            <p className="truncate text-sm text-stone-500">{item.comment}</p>
           )}
         </button>
 
@@ -999,7 +1074,7 @@ function ItemRow({
             opacity: translate === 0 ? 1 : 0,
             transition: dragging ? "none" : "opacity 150ms ease",
           }}
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 text-base ${
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 text-lg ${
             item.purchased
               ? `${theme.accentBg} border-transparent text-white`
               : "border-stone-300 text-transparent hover:border-stone-400"
@@ -1010,23 +1085,14 @@ function ItemRow({
       </div>
 
       {lightboxOpen &&
-        item.image_url &&
+        images.length > 0 &&
         createPortal(
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={item.brand ?? "Imagen"}
-            onClick={() => setLightboxOpen(false)}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={item.image_url}
-              alt={item.brand ?? ""}
-              onClick={(e) => e.stopPropagation()}
-              className="max-h-[85vh] max-w-[92vw] rounded-xl object-contain shadow-2xl"
-            />
-          </div>,
+          <LightboxCarousel
+            images={images}
+            initialIndex={lightboxIndex}
+            alt={item.brand ?? ""}
+            onClose={() => setLightboxOpen(false)}
+          />,
           document.body
         )}
 
@@ -1035,7 +1101,7 @@ function ItemRow({
           <div
             role="dialog"
             aria-modal="true"
-            aria-label="Editar foto"
+            aria-label="Editar fotos"
             onClick={() => setPhotoEditOpen(false)}
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
           >
@@ -1044,39 +1110,41 @@ function ItemRow({
               className="flex w-full max-w-sm flex-col gap-3 rounded-xl bg-white p-4 shadow-2xl"
             >
               <p className="text-sm font-medium text-stone-700">
-                Foto de &quot;{item.brand || "este ítem"}&quot;
+                Fotos de &quot;{item.brand || "este ítem"}&quot;
               </p>
 
-              {photoDraftUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={photoDraftUrl}
-                  alt=""
-                  className="h-24 w-24 self-center rounded-lg object-cover"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.display = "none";
-                  }}
-                />
+              {images.length > 0 && (
+                <div className="grid grid-cols-4 gap-2">
+                  {images.map((img) => (
+                    <div key={img.id} className="relative aspect-square">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={img.url}
+                        alt=""
+                        className="h-full w-full rounded-lg object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.opacity = "0.3";
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => onDeleteImage(img)}
+                        aria-label="Quitar esta foto"
+                        className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full border border-stone-200 bg-white text-xs font-bold text-stone-500 shadow-sm hover:text-red-600"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
               )}
-
-              <input
-                value={photoDraftUrl}
-                onChange={(e) => setPhotoDraftUrl(e.target.value)}
-                placeholder="Link de una imagen"
-                className="rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-stone-400"
-              />
-
-              <div className="flex items-center gap-2">
-                <div className="h-px flex-1 bg-stone-300" />
-                <span className="text-xs text-stone-400">o</span>
-                <div className="h-px flex-1 bg-stone-300" />
-              </div>
 
               <input
                 ref={photoFileInputRef}
                 type="file"
                 accept="image/*"
-                onChange={handlePhotoFileChange}
+                multiple
+                onChange={handlePhotoFilesChange}
                 className="hidden"
               />
               <button
@@ -1086,39 +1154,49 @@ function ItemRow({
                 className="flex items-center justify-center gap-2 rounded-lg border border-stone-300 px-3 py-2 text-sm text-stone-600 transition hover:bg-stone-100 disabled:cursor-wait disabled:opacity-60"
               >
                 <ImageIcon className="h-4 w-4" />
-                {photoUploading ? "Subiendo…" : "Elegir foto de la galería"}
+                {photoUploading ? "Subiendo…" : "Agregar fotos de la galería"}
               </button>
               {photoUploadError && (
                 <p className="text-xs text-red-600">{photoUploadError}</p>
               )}
 
+              <div className="flex items-center gap-2">
+                <div className="h-px flex-1 bg-stone-300" />
+                <span className="text-xs text-stone-400">o</span>
+                <div className="h-px flex-1 bg-stone-300" />
+              </div>
+
               <div className="flex gap-2">
+                <input
+                  value={linkUrl}
+                  onChange={(e) => setLinkUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addLink();
+                    }
+                  }}
+                  placeholder="Link de una imagen"
+                  className="min-w-0 flex-1 rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-stone-400"
+                />
                 <button
                   type="button"
-                  onClick={savePhotoEdit}
-                  disabled={photoUploading}
-                  className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium text-white disabled:cursor-wait disabled:opacity-60 ${theme.accentBg} ${theme.accentBgHover}`}
+                  onClick={addLink}
+                  disabled={!linkUrl.trim()}
+                  aria-label="Agregar link de imagen"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 text-stone-500 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  Guardar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPhotoEditOpen(false)}
-                  className="rounded-lg border border-stone-300 px-4 py-2 text-sm text-stone-500"
-                >
-                  Cancelar
+                  <PlusIcon />
                 </button>
               </div>
 
-              {item.image_url && (
-                <button
-                  type="button"
-                  onClick={removePhoto}
-                  className="text-xs font-medium text-red-600 hover:text-red-700"
-                >
-                  Quitar foto
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => setPhotoEditOpen(false)}
+                className={`rounded-lg px-4 py-2 text-sm font-medium text-white ${theme.accentBg} ${theme.accentBgHover}`}
+              >
+                Listo
+              </button>
             </div>
           </div>,
           document.body
@@ -1178,15 +1256,139 @@ function ItemRow({
   );
 }
 
+// Vista ampliada de las fotos de un ítem, deslizable entre varias como en
+// cualquier galería: arrastrar con el dedo/mouse, flechas del teclado, o
+// los puntitos de abajo que marcan cuál se está mirando.
+function LightboxCarousel({
+  images,
+  initialIndex,
+  alt,
+  onClose,
+}: {
+  images: ItemImage[];
+  initialIndex: number;
+  alt: string;
+  onClose: () => void;
+}) {
+  const [index, setIndex] = useState(initialIndex);
+  const [dragX, setDragX] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const [width, setWidth] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const startX = useRef<number | null>(null);
+  const draggedRef = useRef(false);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const measure = () => setWidth(el.offsetWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  function handlePointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    startX.current = e.clientX;
+    draggedRef.current = false;
+    (e.target as Element).setPointerCapture(e.pointerId);
+  }
+
+  function handlePointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (startX.current === null) return;
+    const dx = e.clientX - startX.current;
+    if (Math.abs(dx) > SWIPE_DRAG_THRESHOLD) draggedRef.current = true;
+    setDragging(true);
+    setDragX(dx);
+  }
+
+  function endDrag() {
+    if (startX.current === null) return;
+    startX.current = null;
+    setDragging(false);
+    const threshold = width * 0.2;
+    setIndex((i) => {
+      if (dragX <= -threshold && i < images.length - 1) return i + 1;
+      if (dragX >= threshold && i > 0) return i - 1;
+      return i;
+    });
+    setDragX(0);
+  }
+
+  function handleClickCapture(e: React.MouseEvent) {
+    if (draggedRef.current) {
+      draggedRef.current = false;
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
+
+  const translate = -index * width + dragX;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={alt || "Imagen"}
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        onClickCapture={handleClickCapture}
+        className="relative h-[70vh] max-h-[640px] w-[92vw] max-w-md"
+      >
+        <div
+          ref={containerRef}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          style={{ touchAction: "pan-y" }}
+          className="h-full w-full overflow-hidden rounded-xl"
+        >
+          <div
+            className="flex h-full"
+            style={{
+              transform: `translateX(${translate}px)`,
+              transition: dragging ? "none" : "transform 250ms ease",
+            }}
+          >
+            {images.map((img) => (
+              <div key={img.id} className="flex h-full w-full shrink-0 items-center justify-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={img.url} alt={alt} className="h-full w-full object-contain" draggable={false} />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {images.length > 1 && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center gap-1.5">
+            {images.map((img, i) => (
+              <span
+                key={img.id}
+                className={`h-2 w-2 rounded-full transition ${i === index ? "bg-white" : "bg-white/40"}`}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 function AddItemForm({
   theme,
   onAdd,
 }: {
   theme: ReturnType<typeof themeOf>;
-  onAdd: (input: { image_url: string; brand: string; comment: string }) => void;
+  onAdd: (input: { imageUrls: string[]; brand: string; comment: string }) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [imageUrl, setImageUrl] = useState("");
+  const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const [linkUrl, setLinkUrl] = useState("");
   const [brand, setBrand] = useState("");
   const [comment, setComment] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -1195,9 +1397,10 @@ function AddItemForm({
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!brand.trim() && !imageUrl.trim()) return;
-    onAdd({ image_url: imageUrl.trim(), brand: brand.trim(), comment: comment.trim() });
-    setImageUrl("");
+    if (!brand.trim() && imageUrls.length === 0) return;
+    onAdd({ imageUrls, brand: brand.trim(), comment: comment.trim() });
+    setImageUrls([]);
+    setLinkUrl("");
     setBrand("");
     setComment("");
     setUploadError(null);
@@ -1205,20 +1408,34 @@ function AddItemForm({
   }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (!file) return;
+    if (files.length === 0) return;
 
     setUploading(true);
     setUploadError(null);
     try {
-      const url = await uploadItemPhoto(file);
-      setImageUrl(url);
+      const urls: string[] = [];
+      for (const file of files) {
+        urls.push(await uploadItemPhoto(file));
+      }
+      setImageUrls((prev) => [...prev, ...urls]);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "No se pudo subir la foto.");
     } finally {
       setUploading(false);
     }
+  }
+
+  function removeImage(url: string) {
+    setImageUrls((prev) => prev.filter((u) => u !== url));
+  }
+
+  function addLink() {
+    const trimmed = linkUrl.trim();
+    if (!trimmed) return;
+    setImageUrls((prev) => [...prev, trimmed]);
+    setLinkUrl("");
   }
 
   if (!open) {
@@ -1244,32 +1461,38 @@ function AddItemForm({
         autoFocus
         className={`rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:ring-2 ${theme.ring}`}
       />
-      {imageUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={imageUrl}
-          alt=""
-          className="h-24 w-24 self-center rounded-lg object-cover"
-          onError={(e) => {
-            (e.target as HTMLImageElement).style.display = "none";
-          }}
-        />
+
+      {imageUrls.length > 0 && (
+        <div className="flex flex-wrap justify-center gap-2">
+          {imageUrls.map((url) => (
+            <div key={url} className="relative h-16 w-16">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={url}
+                alt=""
+                className="h-full w-full rounded-lg object-cover"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.opacity = "0.3";
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => removeImage(url)}
+                aria-label="Quitar esta foto"
+                className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-stone-200 bg-white text-xs font-bold text-stone-500 shadow-sm hover:text-red-600"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
       )}
-      <input
-        value={imageUrl}
-        onChange={(e) => setImageUrl(e.target.value)}
-        placeholder="Link de una imagen (opcional)"
-        className={`rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:ring-2 ${theme.ring}`}
-      />
-      <div className="flex items-center gap-2">
-        <div className="h-px flex-1 bg-stone-300" />
-        <span className="text-xs text-stone-400">o</span>
-        <div className="h-px flex-1 bg-stone-300" />
-      </div>
+
       <input
         ref={fileInputRef}
         type="file"
         accept="image/*"
+        multiple
         onChange={handleFileChange}
         className="hidden"
       />
@@ -1280,9 +1503,38 @@ function AddItemForm({
         className="flex items-center justify-center gap-2 rounded-lg border border-stone-300 px-3 py-2 text-sm text-stone-600 transition hover:bg-stone-100 disabled:cursor-wait disabled:opacity-60"
       >
         <ImageIcon className="h-4 w-4" />
-        {uploading ? "Subiendo…" : "Elegir foto de la galería"}
+        {uploading ? "Subiendo…" : "Elegir fotos de la galería"}
       </button>
       {uploadError && <p className="text-xs text-red-600">{uploadError}</p>}
+
+      <div className="flex items-center gap-2">
+        <div className="h-px flex-1 bg-stone-300" />
+        <span className="text-xs text-stone-400">o</span>
+        <div className="h-px flex-1 bg-stone-300" />
+      </div>
+      <div className="flex gap-2">
+        <input
+          value={linkUrl}
+          onChange={(e) => setLinkUrl(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addLink();
+            }
+          }}
+          placeholder="Link de una imagen"
+          className={`min-w-0 flex-1 rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:ring-2 ${theme.ring}`}
+        />
+        <button
+          type="button"
+          onClick={addLink}
+          disabled={!linkUrl.trim()}
+          aria-label="Agregar link de imagen"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-stone-300 text-stone-500 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <PlusIcon />
+        </button>
+      </div>
       <textarea
         value={comment}
         onChange={(e) => setComment(e.target.value)}

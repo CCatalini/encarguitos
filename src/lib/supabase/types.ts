@@ -22,12 +22,19 @@ export type Category = {
 export type Item = {
   id: string;
   category_id: string;
-  image_url: string | null;
   brand: string | null;
   comment: string | null;
   purchased: boolean;
   sort_order: number;
   created_by: string | null;
+  created_at: string;
+};
+
+export type ItemImage = {
+  id: string;
+  item_id: string;
+  url: string;
+  sort_order: number;
   created_at: string;
 };
 
@@ -56,6 +63,12 @@ export type Database = {
         Row: Item;
         Insert: Partial<Item> & { category_id: string };
         Update: Partial<Item>;
+        Relationships: [];
+      };
+      item_images: {
+        Row: ItemImage;
+        Insert: Partial<ItemImage> & { item_id: string; url: string };
+        Update: Partial<ItemImage>;
         Relationships: [];
       };
     };

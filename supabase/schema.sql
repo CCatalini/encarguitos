@@ -34,7 +34,6 @@ create table if not exists categories (
 create table if not exists items (
                                      id uuid primary key default gen_random_uuid(),
     category_id uuid not null references categories(id) on delete cascade,
-    image_url text,
     brand text,
     comment text,
     purchased boolean not null default false,
@@ -43,8 +42,18 @@ create table if not exists items (
     created_at timestamptz not null default now()
     );
 
+-- Un ítem puede tener varias fotos (galería con carrusel en la app).
+create table if not exists item_images (
+    id uuid primary key default gen_random_uuid(),
+    item_id uuid not null references items(id) on delete cascade,
+    url text not null,
+    sort_order integer not null default 0,
+    created_at timestamptz not null default now()
+    );
+
 create index if not exists categories_requester_id_idx on categories(requester_id);
 create index if not exists items_category_id_idx on items(category_id);
+create index if not exists item_images_item_id_idx on item_images(item_id);
 
 -- ─────────────────────────────────────────────────────────
 -- Seed data: two starter requesters + categories.
@@ -81,6 +90,7 @@ from requesters r
 alter table requesters enable row level security;
 alter table categories enable row level security;
 alter table items enable row level security;
+alter table item_images enable row level security;
 
 create policy "requesters: public read" on requesters
   for select using (true);
@@ -109,6 +119,15 @@ create policy "items: public update" on items
 create policy "items: public delete" on items
   for delete using (true);
 
+create policy "item_images: public read" on item_images
+  for select using (true);
+create policy "item_images: public insert" on item_images
+  for insert with check (true);
+create policy "item_images: public update" on item_images
+  for update using (true) with check (true);
+create policy "item_images: public delete" on item_images
+  for delete using (true);
+
 -- ─────────────────────────────────────────────────────────
 -- Realtime: so a new person, a new category, or "purchased"
 -- sync instantly across everyone's phone.
@@ -117,6 +136,7 @@ create policy "items: public delete" on items
 alter publication supabase_realtime add table requesters;
 alter publication supabase_realtime add table categories;
 alter publication supabase_realtime add table items;
+alter publication supabase_realtime add table item_images;
 
 -- ─────────────────────────────────────────────────────────
 -- Storage: bucket for photos taken from the phone
